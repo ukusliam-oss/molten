@@ -32,18 +32,43 @@
     </svg>
   </a>
   <nav class="nav__links" aria-label="Sections">
-    <a class="pill" href="#top">Studio</a>
+    <a class="pill" href="#top" data-action="about">About</a>
     <a class="pill" href="#top" data-action="list">Work</a>
-    <a class="pill" href="#top">Contact</a>
+    <a class="pill" href="#top" data-action="contact">Contact</a>
   </nav>
 </header>
 
 <main>
   <section class="hero" id="top">
     <canvas class="hero__gl" aria-hidden="true"></canvas>
-    <h1 class="sr-only">Molten — a small studio for websites that move like liquid</h1>
+    <h1 class="sr-only">Molten — a console for the things I make</h1>
   </section>
 </main>
+
+<div class="viewer" hidden role="dialog" aria-modal="true" aria-labelledby="viewer-title">
+  <div class="viewer__inner">
+    <figure class="viewer__media">
+      <img class="viewer__img" alt="">
+      <figcaption class="viewer__cap"></figcaption>
+      <div class="viewer__nav">
+        <button class="round" type="button" data-step="-1" aria-label="Previous screen">←</button>
+        <span class="viewer__count"></span>
+        <button class="round" type="button" data-step="1" aria-label="Next screen">→</button>
+      </div>
+    </figure>
+    <div class="viewer__text">
+      <p class="viewer__kind"></p>
+      <h2 class="viewer__title" id="viewer-title"></h2>
+      <p class="viewer__story"></p>
+      <ul class="viewer__facts"></ul>
+      <p class="viewer__updated"></p>
+      <div class="viewer__actions">
+        <a class="viewer__link" target="_blank" rel="noopener">Open the live site ↗</a>
+        <button class="pill viewer__close" type="button">Back · B</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script type="module" src="js/main.js"></script>
 </body>

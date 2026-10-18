@@ -3,6 +3,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { pointer, watch, makeRenderer, studioLight, damp, clamp, ease, rng } from './util.js';
 import { paintType } from './type.js';
 import { makeScreen } from './screen.js';
+import { HANDLE } from './cartridges.js';
 
 // Buttermax-style hero: black ink chases the cursor across a butter-yellow page while a
 // see-through handheld floats in the middle. The handheld is the site's controller: its buttons
@@ -134,10 +135,16 @@ export function hero(section, initial) {
   const cart = buildCart();
   cart.group.position.set(0, SLOT_Y + SLOT_OUT, -0.21);
   device.group.add(cart.group);
+  device.targets.push(...cart.hits);
   const slot = { lift: SLOT_OUT, v: 0, target: SLOT_OUT, next: null, current: null };
+  // turning the console over: dragged by hand or sent by the controller
+  const flip = { a: 0, v: 0, target: 0, dragging: false, base: 0 };
 
   // shared with the controller and the screen
-  const state = { mode: 'home', index: -1, cursor: 0, carts: [], toast: null, toastUntil: 0, flashUntil: 0 };
+  const state = {
+    mode: 'home', index: -1, cursor: 0, carts: [], toast: null, toastUntil: 0,
+    flashUntil: 0, slotAt: 0, paused: false,
+  };
 
   let W = 1, H = 1, baseY = 0;
   const main = { x: 0, y: 0, vx: 0, vy: 0 };
@@ -216,6 +223,29 @@ export function hero(section, initial) {
     return Math.abs(p.x) > Math.abs(p.y) ? (p.x > 0 ? 'right' : 'left') : (p.y > 0 ? 'up' : 'down');
   }
 
+  // flip to the back (on) or the front; the angle keeps winding so a spin never snaps backwards
+  function flipTo(on) {
+    let k = Math.round(flip.a / Math.PI);
+    if (on !== (Math.abs(k) % 2 === 1)) k += 1;
+    flip.target = k * Math.PI;
+  }
+  function dragStart() { flip.dragging = true; flip.base = flip.a; flip.v = 0; }
+  function dragTo(angle) { flip.a = flip.base + angle; }
+  function dragEnd() {
+    flip.dragging = false;
+    const k = Math.round(flip.a / Math.PI);
+    flip.target = k * Math.PI;
+    return Math.abs(k) % 2 === 1;
+  }
+
+  // where the console's screen is on the page, for the viewer to open from
+  const at = new THREE.Vector3();
+  function screenPoint() {
+    device.screen.getWorldPosition(at).project(camera);
+    const r = canvas.getBoundingClientRect();
+    return { x: r.left + (at.x + 1) / 2 * r.width, y: r.top + (1 - at.y) / 2 * r.height };
+  }
+
   function insert(c) { slot.next = c; slot.target = SLOT_OUT; }
   function eject() { slot.next = null; slot.target = SLOT_OUT; }
   function press(name) { pressed[name] = 1; }
@@ -233,7 +263,7 @@ export function hero(section, initial) {
   }
 
   function tick(t, dt) {
-    if (!seen.on) return;
+    if (!seen.on || state.paused) return;
     const rect = section.getBoundingClientRect();
     const R = Math.min(W, H) * 0.13;
 
@@ -311,10 +341,14 @@ export function hero(section, initial) {
     device.dpad.rotation.x = (amt('down') - amt('up')) * 0.22;
     for (const [k, b] of Object.entries(device.buttons)) b.obj.position.z = b.rest - 0.04 * amt(k);
 
-    // the handheld leans toward the pointer
+    // the handheld leans toward the pointer, on top of however far it has been turned over
+    if (!flip.dragging) {
+      flip.v += ((flip.target - flip.a) * 60 - flip.v * 11) * dt;
+      flip.a += flip.v * dt;
+    }
     tilt.y = damp(tilt.y, pointer.nx * 0.45 + Math.sin(t * 0.5) * 0.12, 3, dt);
     tilt.x = damp(tilt.x, -pointer.ny * 0.3 + Math.sin(t * 0.7) * 0.06, 3, dt);
-    device.group.rotation.set(tilt.x, tilt.y, 0.06 + Math.sin(t * 0.4) * 0.03);
+    device.group.rotation.set(tilt.x, tilt.y + flip.a, 0.06 + Math.sin(t * 0.4) * 0.03);
     device.group.position.y = baseY + Math.sin(t * 1.1) * 0.05;
 
     device.screen.material.uniforms.uTime.value = t;
@@ -326,9 +360,13 @@ export function hero(section, initial) {
     settle();
     paint(baseA, hideA, content);
     if (slot.current) cart.paint(slot.current);
+    device.repaint();
   }
 
-  return { canvas, state, tick, refresh, pick, press, show, insert, eject, splash };
+  return {
+    canvas, state, tick, refresh, pick, press, show, insert, eject, splash,
+    flipTo, dragStart, dragTo, dragEnd, screenPoint,
+  };
 }
 
 function buildDevice() {
@@ -336,15 +374,17 @@ function buildDevice() {
   const rand = rng(7);
   const W = 2.0, H = 3.1, D = 0.42;
 
-  // translucent, slightly pink, iridescent shell
-  group.add(new THREE.Mesh(
+  // translucent, slightly pink, iridescent shell; grabbing it turns the console over
+  const shell = new THREE.Mesh(
     new RoundedBoxGeometry(W, H, D, 6, 0.16),
     new THREE.MeshPhysicalMaterial({
       color: '#ffe6ee', transmission: 1, roughness: 0.1, thickness: 0.3, ior: 1.35,
       iridescence: 1, iridescenceIOR: 1.25, iridescenceThicknessRange: [120, 420],
       clearcoat: 0.5, clearcoatRoughness: 0.08, envMapIntensity: 0.45,
     }),
-  ));
+  );
+  shell.userData.button = 'shell';
+  group.add(shell);
 
   // circuit board with gold traces
   const pcb = new THREE.Mesh(
@@ -368,7 +408,7 @@ function buildDevice() {
 
   const shellWhite = new THREE.MeshStandardMaterial({ color: '#f1ede7', roughness: 0.45 });
   const keyWhite = new THREE.MeshStandardMaterial({ color: '#e6e2db', roughness: 0.35 });
-  const targets = [];
+  const targets = [shell];
   const hit = (geo, button) => {
     const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial());
     m.visible = false;              // raycasts still hit invisible meshes
@@ -386,9 +426,10 @@ function buildDevice() {
     new THREE.ShaderMaterial({ uniforms: { uTime: { value: 0 }, uUI: { value: null } }, vertexShader: vertex, fragmentShader: screenFragment }),
   );
   screen.position.set(0, 0.62, 0.05);
-  screen.userData.button = 'screen';
-  targets.push(screen);
   group.add(screen);
+  const glass = hit(new THREE.PlaneGeometry(1.3, 1.16), 'screen');   // in front of the shell, which would catch the ray first
+  glass.position.set(0, 0.62, 0.23);
+  group.add(glass);
 
   // d-pad on a round seat; it tilts toward the arm you press
   const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.03, 40), shellWhite);
@@ -438,7 +479,47 @@ function buildDevice() {
     buttons[id] = { obj: b, rest: 0.19 };
   }
 
-  return { group, screen, dpad, buttons, targets };
+  // the back, seen when the console is turned over to its about side: a label and a battery cover
+  const label = stickerTexture();
+  // (kept below y ≈ 1.0, where a seated cartridge covers the back)
+  const sticker = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.625), new THREE.MeshStandardMaterial({ map: label.tex, roughness: 0.7 }));
+  sticker.position.set(0, 0.15, -0.218);
+  sticker.rotation.y = Math.PI;
+  const cover = new THREE.Mesh(new RoundedBoxGeometry(1.3, 0.56, 0.03, 2, 0.012), new THREE.MeshStandardMaterial({ color: '#d9d3c9', roughness: 0.5 }));
+  cover.position.set(0, -1.1, -0.215);
+  group.add(sticker, cover);
+
+  return { group, screen, dpad, buttons, targets, repaint: label.paint };
+}
+
+function stickerTexture() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 640;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  function paint() {
+    const x = c.getContext('2d');
+    x.fillStyle = '#f3ede2'; x.fillRect(0, 0, 512, 640);
+    x.fillStyle = '#ffb41f'; x.fillRect(0, 0, 512, 22);
+    x.fillStyle = '#0e0e0e';
+    x.font = '900 92px "Inter Tight", Arial, sans-serif';
+    x.fillText('MOLTEN', 30, 132);
+    x.font = '600 20px "Inter Tight", Arial, sans-serif';
+    ['MODEL  MLT-01', `MADE BY  @${HANDLE.toUpperCase()}`, 'SWIFT · THREE.JS · GODOT', 'PLAYS  FOLIO · TERM · THRESHOLD', 'MADE IN 2026']
+      .forEach((row, i) => { x.fillText(row, 34, 194 + i * 42); x.fillRect(34, 206 + i * 42, 444, 1); });
+    const rand = rng(11);
+    for (let bx = 34; bx < 330;) {
+      const w = 2 + Math.floor(rand() * 5);
+      if (rand() > 0.35) x.fillRect(bx, 470, w, 110);
+      bx += w + 2;
+    }
+    x.font = '600 16px "Inter Tight", Arial, sans-serif';
+    x.fillText('0 26 MOLTEN 01', 34, 606);
+    tex.needsUpdate = true;
+  }
+  paint();
+  return { tex, paint };
 }
 
 // a cartridge in the project's colour with a cream label on the part that sticks out
@@ -452,7 +533,9 @@ function buildCart() {
   labelTex.anisotropy = 4;
   const label = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.325), new THREE.MeshStandardMaterial({ map: labelTex, roughness: 0.6 }));
   label.position.set(0, 0.24, 0.061);
-  group.add(new THREE.Mesh(new RoundedBoxGeometry(1.5, 0.9, 0.12, 3, 0.04), shell), label);
+  const body = new THREE.Mesh(new RoundedBoxGeometry(1.5, 0.9, 0.12, 3, 0.04), shell);
+  body.userData.button = label.userData.button = 'cart';   // clicking the cartridge pulls it out
+  group.add(body, label);
 
   function paint(cart) {
     shell.color.set(cart.color);
@@ -469,7 +552,7 @@ function buildCart() {
     c.fillText(cart.kind, 488, 74);
     labelTex.needsUpdate = true;
   }
-  return { group, paint };
+  return { group, paint, hits: [body, label] };
 }
 
 function letterTexture(ch) {

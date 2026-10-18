@@ -1,8 +1,11 @@
-import { CARTRIDGES, HOME } from './cartridges.js';
+import { CARTRIDGES, HOME, ABOUT, CONTACT, GITHUB } from './cartridges.js';
+import { prepare } from './screen.js';
+import { makeViewer } from './viewer.js';
 import { sfx } from './sound.js';
 
-// Turns key presses and taps on the handheld into what the console does.
-// Modes: home (no cartridge), cart (one slotted), list (SELECT menu on the screen).
+// Turns key presses, taps and drags on the handheld into what the console does.
+// Modes: home (no cartridge) · cart (one slotted) · list (SELECT menu on the screen)
+// · view (the cartridge's page, opened with A) · about (console turned over) · contact.
 
 const KEYS = {
   ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down',
@@ -12,14 +15,37 @@ const KEYS = {
 // face buttons X and Y double as SELECT and START; tapping the screen is A
 const ACTION = { x: 'select', y: 'start', screen: 'a' };
 const DEMO_EVERY = 5000;
+const DRAG_TURN = 0.012;        // radians per pixel dragged
+const DRAG_MIN = 6;             // pixels before a press on the shell counts as a drag
 
 const pad2 = v => String(v).padStart(2, '0');
+
+export function ago(iso) {
+  const s = (Date.now() - Date.parse(iso)) / 1000;
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))} MIN AGO`;
+  if (s < 86400) return `${Math.round(s / 3600)} H AGO`;
+  const d = Math.round(s / 86400);
+  return d === 1 ? 'YESTERDAY' : `${d} DAYS AGO`;
+}
+
+// last push to a public repo, once per visit; a failure just leaves the line out
+async function lastPush(repo) {
+  const key = `molten.push.${repo}`;
+  try { const v = sessionStorage.getItem(key); if (v) return v; } catch { /* storage blocked */ }
+  try {
+    const r = await fetch(`https://api.github.com/repos/${repo}/commits?per_page=1`);
+    if (!r.ok) return null;
+    const date = (await r.json())[0]?.commit?.committer?.date || null;
+    if (date) try { sessionStorage.setItem(key, date); } catch { /* storage blocked */ }
+    return date;
+  } catch { return null; }
+}
 
 function contentFor(cart, i) {
   return {
     heavy: cart.heavy, script: cart.script, line: cart.line, facts: cart.facts,
-    left: `CART ${pad2(i + 1)} / ${pad2(CARTRIDGES.length)} · ${cart.kind}`,
-    right: cart.url ? 'STIR TO READ · A TO OPEN' : 'STIR TO READ',
+    left: `CART ${pad2(i + 1)} / ${pad2(CARTRIDGES.length)} · ${cart.kind}${cart.updated ? ` · UPDATED ${ago(cart.updated)}` : ''}`,
+    right: 'STIR TO READ · A TO VIEW',
   };
 }
 
@@ -31,10 +57,20 @@ export function controller(hero) {
   const toast = (msg, d = 1.2) => { s.toast = msg; s.toastUntil = now() + d; };
   let demo = null;
 
+  setTimeout(() => prepare(CARTRIDGES), 600);
+  for (const cart of CARTRIDGES) if (cart.repo) lastPush(cart.repo).then(d => { if (d) cart.updated = d; });
+
+  const viewer = makeViewer(() => press('b', null));
+  const current = () => (s.index >= 0 ? contentFor(CARTRIDGES[s.index], s.index) : HOME);
+  const settleMode = () => { s.mode = s.index >= 0 ? 'cart' : 'home'; };
+  const openTab = url => window.open(url, '_blank', 'noopener');
+
   function slot(i) {
     s.index = (i + n) % n;
     s.mode = 'cart';
     s.flashUntil = now() + 0.3;
+    s.slotAt = now();
+    hero.flipTo(false);
     hero.show(contentFor(CARTRIDGES[s.index], s.index));
     hero.insert(CARTRIDGES[s.index]);
     hero.splash();
@@ -49,22 +85,58 @@ export function controller(hero) {
     sfx.back();
   }
 
-  function open() {
-    const cart = CARTRIDGES[s.index];
-    if (cart.url) {
-      sfx.open();
-      toast('OPENING');
-      window.open(cart.url, '_blank', 'noopener');
-    } else {
-      sfx.nope();
-      toast('VIDEO SOON');
-    }
+  function view() {
+    s.mode = 'view';
+    stopDemo();
+    viewer.open(CARTRIDGES[s.index], hero.screenPoint(), ago);
+    sfx.open();
+    setTimeout(() => { if (s.mode === 'view') s.paused = true; }, viewer.OPEN_MS);   // nothing to draw behind it
   }
 
-  const leaveList = () => { s.mode = s.index >= 0 ? 'cart' : 'home'; sfx.back(); };
+  function closeView() {
+    s.paused = false;
+    settleMode();
+    viewer.close(hero.screenPoint());
+    sfx.back();
+  }
+
+  function about() {
+    s.mode = 'about';
+    hero.flipTo(true);
+    hero.show(ABOUT);
+    sfx.move();
+  }
+
+  function contact() {
+    s.mode = 'contact';
+    hero.flipTo(false);
+    hero.show(CONTACT);
+    sfx.move();
+  }
+
+  // back to the front, to whatever was there before
+  function front() {
+    hero.flipTo(false);
+    settleMode();
+    hero.show(current());
+    sfx.back();
+  }
+
   const stopDemo = () => { clearInterval(demo); demo = null; };
 
   function act(name) {
+    if (s.mode === 'view') {
+      if (name === 'left' || name === 'right') viewer.step(name === 'right' ? 1 : -1);
+      else if (name === 'a' && CARTRIDGES[s.index].url) openTab(CARTRIDGES[s.index].url);
+      else if (name === 'b' || name === 'select') closeView();
+      return;
+    }
+    if (s.mode === 'about' || s.mode === 'contact') {
+      if (name === 'a') { sfx.open(); openTab(GITHUB); return; }
+      if (name === 'b' || name === 'select') { front(); return; }
+      if (name !== 'left' && name !== 'right') return;
+      settleMode();               // a d-pad press goes straight on to the cartridges
+    }
     switch (name) {
       case 'left':
       case 'right': {
@@ -80,14 +152,14 @@ export function controller(hero) {
       case 'a':
         if (s.mode === 'home') slot(0);
         else if (s.mode === 'list') slot(s.cursor);
-        else open();
+        else view();
         break;
       case 'b':
-        if (s.mode === 'list') leaveList();
+        if (s.mode === 'list') { settleMode(); sfx.back(); }
         else if (s.mode === 'cart') eject();
         break;
       case 'select':
-        if (s.mode === 'list') leaveList();
+        if (s.mode === 'list') { settleMode(); sfx.back(); }
         else { s.cursor = Math.max(0, s.index); s.mode = 'list'; sfx.move(); }
         break;
       case 'start':
@@ -101,7 +173,7 @@ export function controller(hero) {
 
   function press(name, button = name) {
     if (demo && name !== 'start') stopDemo();
-    hero.press(button);
+    if (button) hero.press(button);
     sfx.press();
     act(name);
   }
@@ -110,25 +182,64 @@ export function controller(hero) {
     const k = KEYS[e.key];
     if (!k || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.repeat && !['left', 'right', 'up', 'down'].includes(k)) return;
+    if (s.mode === 'view' && e.key === ' ' && document.activeElement?.closest('.viewer')) return;   // let Space press the focused button
     e.preventDefault();
     press(k);
   });
 
+  // pointer: press a button, pull the cartridge, or grab the shell and turn the console over
   const canvas = hero.canvas;
+  let drag = null;
   canvas.addEventListener('pointerdown', e => {
+    if (s.mode === 'view') return;
     const hit = hero.pick(e.clientX, e.clientY);
     if (!hit) return;
     e.preventDefault();
+    if (hit === 'shell') {
+      drag = { x: e.clientX, moved: false };
+      hero.dragStart();
+      canvas.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (hit === 'cart') { if (s.mode === 'cart') press('b', null); return; }
     press(ACTION[hit] || hit, hit);
   });
   canvas.addEventListener('pointermove', e => {
-    canvas.style.cursor = hero.pick(e.clientX, e.clientY) ? 'pointer' : '';
+    if (drag) {
+      const dx = e.clientX - drag.x;
+      if (Math.abs(dx) > DRAG_MIN) drag.moved = true;
+      hero.dragTo(drag.moved ? dx * DRAG_TURN : 0);
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
+    const hit = hero.pick(e.clientX, e.clientY);
+    canvas.style.cursor = hit === 'shell' ? 'grab' : hit ? 'pointer' : '';
   }, { passive: true });
+  function endDrag() {
+    if (!drag) return;
+    drag = null;
+    const back = hero.dragEnd();
+    if (back && s.mode !== 'about') about();
+    else if (!back && s.mode === 'about') front();
+  }
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
 
-  document.querySelector('[data-action="list"]')?.addEventListener('click', e => {
+  // the nav pills drive the same console
+  const pills = {
+    about: () => (s.mode === 'about' ? front() : about()),
+    contact: () => (s.mode === 'contact' ? front() : contact()),
+    list: () => {
+      if (s.mode === 'about' || s.mode === 'contact') { hero.flipTo(false); settleMode(); hero.show(current()); }
+      if (s.mode !== 'list') press('select');
+    },
+  };
+  document.querySelectorAll('[data-action]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
-    press('select');
-  });
+    if (s.mode === 'view') closeView();
+    stopDemo();
+    pills[a.dataset.action]?.();
+  }));
 
   return { press };
 }

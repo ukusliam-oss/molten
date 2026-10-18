@@ -1,10 +1,55 @@
 import * as THREE from 'three';
 
 // The console's display: a 160×144 canvas (the Game Boy's resolution) drawn in a pixel font.
-// Transparent pixels let the iridescent idle pattern show through.
+// Transparent pixels let the iridescent idle pattern show through. A cartridge's real screenshots
+// are dithered into four tones of its own colour and shown as a slideshow.
 
 const SW = 160, SH = 144;
+const AW = 160, AH = 104, AY = 14;          // where the art sits: between the header and the footer
 const INK = '#0e0e0e', PAPER = '#ffb41f', CREAM = '#fff1dc', LINE = '#b8ad9b';
+const SLIDE = 3.2;                           // seconds per screenshot
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+
+const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+
+// ---- screenshots → four-tone pixel art, made once per image
+const art = new Map();
+function dither(img, [x, y, w, h], pal) {
+  const cv = document.createElement('canvas');
+  cv.width = AW; cv.height = AH;
+  const g = cv.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(img, x, y, w, h, 0, 0, AW, AH);
+  const d = g.getImageData(0, 0, AW, AH), p = d.data;
+  const lum = new Float32Array(AW * AH);
+  let lo = 1, hi = 0;
+  for (let i = 0; i < lum.length; i++) {
+    const l = (0.2126 * p[i * 4] + 0.7152 * p[i * 4 + 1] + 0.0722 * p[i * 4 + 2]) / 255;
+    lum[i] = l; lo = Math.min(lo, l); hi = Math.max(hi, l);
+  }
+  for (let i = 0; i < lum.length; i++) {
+    const t = (lum[i] - lo) / Math.max(1e-3, hi - lo);
+    const b = (BAYER[(i % AW & 3) + ((Math.floor(i / AW) & 3) << 2)] + 0.5) / 16 - 0.5;
+    const c = pal[Math.max(0, Math.min(3, Math.round(t * 3 + b)))];
+    p[i * 4] = c[0]; p[i * 4 + 1] = c[1]; p[i * 4 + 2] = c[2]; p[i * 4 + 3] = 255;
+  }
+  g.putImageData(d, 0, 0);
+  return cv;
+}
+export function prepare(carts) {
+  for (const cart of carts) {
+    const pal = [rgb(cart.screen), rgb(cart.color), mix(rgb(cart.color), rgb(CREAM), 0.55), rgb(CREAM)];
+    cart.shots.forEach((shot, i) => {
+      const key = `${cart.id}:${i}`;
+      if (art.has(key)) return;
+      art.set(key, null);
+      const img = new Image();
+      img.onload = () => art.set(key, dither(img, shot.crop, pal));
+      img.src = shot.src;
+    });
+  }
+}
 
 export function makeScreen() {
   const canvas = document.createElement('canvas');
@@ -30,6 +75,11 @@ export function makeScreen() {
     c.fillStyle = color;
     for (let i = 0; i < 4; i++) c.fillRect(x + i * dir, y + i, 1, 7 - i * 2);
   }
+  function footer(label, blink, arrows = true) {
+    box(0, AY + AH, SW, SH - AY - AH, INK);
+    if (arrows && blink) { arrow(6, 128, -1, CREAM); arrow(153, 128, 1, CREAM); }
+    text(label, SW / 2, 128, 8, CREAM, 'center');
+  }
 
   function home(blink) {
     box(0, 0, SW, 13, INK);
@@ -41,7 +91,7 @@ export function makeScreen() {
     arrow(123, 121, 1, CREAM);
   }
 
-  // placeholder previews until each cartridge gets its real recording
+  // drawn previews, for a cartridge with no screenshots it can show
   function preview(id, t) {
     if (id === 'folio') {
       box(38, 56, 40, 48, CREAM); box(82, 56, 40, 48, CREAM); box(78, 56, 4, 48, '#c9bfae');
@@ -58,22 +108,35 @@ export function makeScreen() {
       c.strokeStyle = '#fff'; c.lineWidth = 1;
       c.strokeRect(28 + k * 21 - 1.5, 56 + r * 8 - 1.5, 22, 9);
     } else {
-      box(32, 54, 96, 56, CREAM);
-      text('Q3', 36, 58, 8, '#1f9d6b');
-      for (let r = 0; r < 5; r++) box(36, 70 + r * 7, 84 - (r * 13) % 40, 2, LINE);
-      box(122, 69 + (Math.floor(t * 1.2) % 5) * 7, 3, 4, '#1f9d6b');
+      box(32, 50, 96, 58, CREAM);
+      text('Q3', 36, 54, 8, '#1f9d6b');
+      text('[4]', 124, 54, 8, '#1f9d6b', 'right');
+      for (let r = 0; r < 5; r++) box(36, 66 + r * 7, 84 - (r * 13) % 40, 2, LINE);
+      box(122, 65 + (Math.floor(t * 1.2) % 5) * 7, 3, 4, '#1f9d6b');
     }
   }
 
   function cart(s, cart, t, blink) {
     box(0, 0, SW, SH, cart.screen);
-    text(`${s.index + 1}/${s.carts.length}`, SW - 4, 4, 8, cart.color, 'right');
-    const name = cart.name.toUpperCase();
-    text(name, SW / 2, 18, name.length * 16 <= 152 ? 16 : 8, '#ffffff', 'center');
-    text(cart.kind, SW / 2, 40, 8, cart.color, 'center');
-    preview(cart.id, t);
-    if (blink) { arrow(6, 124, -1, CREAM); arrow(153, 124, 1, CREAM); }
-    text(cart.url ? 'A OPEN B BACK' : 'B BACK', SW / 2, 126, 8, CREAM, 'center');
+    box(0, 0, SW, AY, cart.color);
+    text(cart.name.toUpperCase(), 4, 3, 8, '#ffffff');
+    text(`${s.index + 1}/${s.carts.length}`, SW - 4, 3, 8, '#ffffff', 'right');
+    const n = cart.shots.length;
+    if (n) {
+      const since = Math.max(0, t - s.slotAt), k = Math.floor(since / SLIDE) % n, f = (since / SLIDE) % 1;
+      const cur = art.get(`${cart.id}:${k}`);
+      if (cur) c.drawImage(cur, 0, AY); else preview(cart.id, t);
+      const next = n > 1 && f > 0.9 && art.get(`${cart.id}:${(k + 1) % n}`);
+      if (next) {   // wipe to the next screenshot
+        const w = Math.round((f - 0.9) / 0.1 * SW);
+        c.drawImage(next, 0, 0, w, AH, 0, AY, w, AH);
+        box(w, AY, 2, AH, CREAM);
+      }
+    } else {
+      text(cart.kind, SW / 2, 30, 8, cart.color, 'center');
+      preview(cart.id, t);
+    }
+    footer('A VIEW  B BACK', blink);
   }
 
   function list(s) {
@@ -85,6 +148,14 @@ export function makeScreen() {
       text(cart.name.toUpperCase(), 26, y, 8, on ? INK : CREAM);
     });
     text('A SLOT  B BACK', SW / 2, 126, 8, CREAM, 'center');
+  }
+
+  function contact(blink) {
+    box(0, 0, SW, SH, INK);
+    text('CONTACT', SW / 2, 14, 8, PAPER, 'center');
+    text('GITHUB', SW / 2, 46, 16, CREAM, 'center');
+    text('@UKUSLIAM-OSS', SW / 2, 72, 8, PAPER, 'center');
+    if (blink) text('A OPEN  B BACK', SW / 2, 120, 8, CREAM, 'center');
   }
 
   function flash() {
@@ -104,7 +175,8 @@ export function makeScreen() {
     const blink = Math.floor(t * 2) % 2 === 0;
     if (t < s.flashUntil) flash();
     else if (s.mode === 'list') list(s);
-    else if (s.mode === 'cart') cart(s, s.carts[s.index], t, blink);
+    else if (s.mode === 'contact') contact(blink);
+    else if (s.index >= 0) cart(s, s.carts[s.index], t, blink);
     else home(blink);
     if (s.toast && t < s.toastUntil) toast(s.toast);
     tex.needsUpdate = true;

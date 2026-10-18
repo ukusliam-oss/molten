@@ -1,6 +1,7 @@
 :root {
   --paper: #ffb41f;
   --ink: #0e0e0e;
+  --cream: #fff1dc;
   --sans: "Inter Tight", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --gutter: clamp(16px, 3vw, 40px);
 }
@@ -35,7 +36,46 @@ canvas { display: block; }
 
 /* ---------- hero ---------- */
 .hero { position: relative; height: 100svh; min-height: 560px; overflow: hidden; background: var(--paper); }
-.hero__gl { position: absolute; inset: 0; width: 100%; height: 100%; }
+.hero__gl { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+
+/* ---------- viewer: a cartridge's page, spreading out of the console screen ---------- */
+.viewer {
+  --x: 50vw; --y: 50vh;
+  position: fixed; inset: 0; z-index: 60; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--ink); color: var(--cream);
+  clip-path: circle(0 at var(--x) var(--y));
+  transition: clip-path .7s cubic-bezier(.7, 0, .2, 1);
+}
+.viewer.is-open { clip-path: circle(150vmax at var(--x) var(--y)); }
+.viewer[hidden] { display: block; visibility: hidden; }
+.viewer__inner {
+  min-height: 100%; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: clamp(28px, 5vw, 80px); align-items: center;
+  padding: clamp(72px, 9vh, 110px) var(--gutter) 40px;
+}
+.viewer__media { display: grid; justify-items: center; gap: 14px; }
+.viewer__media[hidden] { display: none; }
+.viewer__media[hidden] + .viewer__text { grid-column: 1 / -1; max-width: 760px; justify-self: center; }
+.viewer__img { display: block; max-width: 100%; max-height: 68vh; border-radius: 18px; box-shadow: 0 30px 80px rgb(0 0 0 / .5); }
+.viewer__img.is-tall { max-height: 74vh; border-radius: 26px; }
+.viewer__cap { font-size: 13px; color: rgb(255 241 220 / .6); text-align: center; }
+.viewer__nav { display: flex; align-items: center; gap: 14px; font-size: 12px; font-weight: 600; letter-spacing: .06em; }
+.viewer__nav .round[hidden] { display: none; }
+.round { width: 44px; height: 44px; border-radius: 50%; border: 0; background: #1f1f1f; color: var(--cream); font: inherit; font-size: 16px; cursor: pointer; transition: background .2s, transform .2s; }
+.round:hover { background: #2c2c2c; transform: scale(1.06); }
+.viewer__kind { color: var(--paper); font-size: 11px; font-weight: 600; letter-spacing: .08em; }
+.viewer__title { margin-top: 10px; font-size: clamp(64px, 9vw, 150px); line-height: .9; letter-spacing: -.05em; font-weight: 900; }
+.viewer__title .s { font-family: "Mr Dafoe", cursive; font-weight: 400; letter-spacing: 0; color: var(--paper); font-size: 1.25em; margin-left: -.04em; }
+.viewer__story { margin-top: 26px; max-width: 46ch; font-size: clamp(16px, 1.25vw, 19px); line-height: 1.55; color: rgb(255 241 220 / .86); }
+.viewer__facts { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 8px; list-style: none; }
+.viewer__facts li { border: 1.5px solid rgb(255 241 220 / .5); border-radius: 999px; padding: 7px 14px; font-size: 11px; font-weight: 600; letter-spacing: .06em; }
+.viewer__updated { margin-top: 18px; font-size: 13px; color: rgb(255 241 220 / .6); }
+.viewer__updated:empty { display: none; }
+.viewer__actions { margin-top: 30px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.viewer__link { display: inline-flex; align-items: center; height: 44px; padding: 0 22px; border-radius: 999px; background: var(--paper); color: var(--ink); font-weight: 600; font-size: 15px; }
+.viewer__link[hidden] { display: none; }
+.viewer__close { height: 44px; padding: 0 20px; background: none; color: var(--cream); cursor: pointer; font: inherit; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.viewer__close:hover { background: var(--cream); color: var(--ink); }
 
 /* ---------- phone ---------- */
 @media (max-width: 720px) {
@@ -43,4 +83,6 @@ canvas { display: block; }
   .nav__logo { display: none; }
   .nav__links { gap: 6px; }
   .pill { height: 28px; padding: 0 11px; font-size: 10px; }
+  .viewer__inner { grid-template-columns: 1fr; padding: 64px 16px 32px; align-items: start; }
+  .viewer__img, .viewer__img.is-tall { max-height: 56vh; }
 }
