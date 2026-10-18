@@ -36,6 +36,7 @@ export const sfx = {
     blip(660, 0.06, { at: 0.2 });
     blip(990, 0.09, { at: 0.26 });
   },
+  seat: () => { blip(1800, 0.025, { type: 'triangle', gain: 0.06 }); blip(420, 0.06, { type: 'triangle', gain: 0.07, at: 0.018, slide: 0.6 }); },
   open: () => [523, 659, 784, 1047].forEach((f, i) => blip(f, 0.08, { at: i * 0.06 })),
   back: () => blip(520, 0.1, { slide: 0.6 }),
   nope: () => { blip(200, 0.08, { gain: 0.04 }); blip(150, 0.12, { gain: 0.04, at: 0.09 }); },

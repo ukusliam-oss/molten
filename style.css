@@ -29,6 +29,7 @@ canvas { display: block; }
 .pill {
   display: inline-flex; align-items: center; height: 30px; padding: 0 16px;
   border: 1.5px solid currentColor; border-radius: 999px;
+  background: var(--paper);   /* solid, so the pills stay readable when ink passes under them */
   font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
   transition: background .25s, color .25s;
 }
@@ -37,6 +38,22 @@ canvas { display: block; }
 /* ---------- hero ---------- */
 .hero { position: relative; height: 100svh; min-height: 560px; overflow: hidden; background: var(--paper); }
 .hero__gl { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+
+/* the wordmark in plain HTML: covers the canvas until its first frame (with fonts) is ready,
+   and stays if WebGL can't start, so the page is never just an empty yellow */
+.hero__fallback {
+  position: absolute; inset: 0; z-index: 1; background: var(--paper);
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  padding: 0 var(--gutter) 6vh; text-align: center;
+  transition: opacity .5s ease, visibility 0s linear .5s;
+}
+.hero.is-live .hero__fallback { opacity: 0; visibility: hidden; }
+.hero__word { font-weight: 900; font-size: min(26vw, 38vh); line-height: .8; letter-spacing: -.055em; white-space: nowrap; }
+.hero__word .s { font-family: "Mr Dafoe", cursive; font-weight: 400; font-size: 1.32em; letter-spacing: 0; margin-left: -.04em; }
+.hero__line { margin-top: 2.2vh; font-size: clamp(10px, .85vw, 13px); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.hero__status { margin-top: 4vh; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .55; animation: pulse 1.2s ease-in-out infinite alternate; }
+.hero.is-broken .hero__status { animation: none; opacity: .8; }
+@keyframes pulse { to { opacity: .2; } }
 
 /* ---------- viewer: a cartridge's page, spreading out of the console screen ---------- */
 .viewer {

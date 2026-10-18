@@ -3,17 +3,30 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Molten — interactive web studio</title>
-<meta name="description" content="Molten is a small studio for websites that move like liquid.">
+<title>Molten — a console for the things I make</title>
+<meta name="description" content="Slot a cartridge, stir the ink: a playable console of the apps I build — Folio, Term and Threshold.">
 <meta name="theme-color" content="#ffb41f">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600;700;900&family=Mr+Dafoe&family=Press+Start+2P&display=swap" rel="stylesheet">
+<!-- link previews (chat apps, socials): absolute URLs, the image is 1200×630 -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Molten">
+<meta property="og:title" content="Molten — a console for the things I make">
+<meta property="og:description" content="Slot a cartridge, stir the ink: a playable console of the apps I build — Folio, Term and Threshold.">
+<meta property="og:url" content="https://ukusliam-oss.github.io/molten/">
+<meta property="og:image" content="https://ukusliam-oss.github.io/molten/media/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A see-through handheld console on a butter-yellow page, black ink swirling through the word Molten">
+<meta name="twitter:card" content="summary_large_image">
+<!-- everything is served from this repo: no font or script CDN, so it also loads where those are blocked -->
+<link rel="preload" href="vendor/fonts/inter-tight-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="vendor/fonts/mr-dafoe-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="vendor/fonts/fonts.css">
 <link rel="stylesheet" href="style.css">
+<link rel="modulepreload" href="vendor/three/three.module.min.js">
 <script type="importmap">
 { "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  "three": "./vendor/three/three.module.min.js",
+  "three/addons/": "./vendor/three/addons/"
 } }
 </script>
 </head>
@@ -42,6 +55,12 @@
   <section class="hero" id="top">
     <canvas class="hero__gl" aria-hidden="true"></canvas>
     <h1 class="sr-only">Molten — a console for the things I make</h1>
+    <!-- shown until the console's first frame is ready, and instead of it if WebGL can't start -->
+    <div class="hero__fallback" aria-hidden="true">
+      <p class="hero__word"><span class="h">Mol</span><span class="s">ten</span></p>
+      <p class="hero__line">A console for the things I make.</p>
+      <p class="hero__status">Warming up the console…</p>
+    </div>
   </section>
 </main>
 

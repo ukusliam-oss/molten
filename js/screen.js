@@ -14,8 +14,11 @@ const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
 const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
 
 // ---- screenshots → four-tone pixel art, made once per image
-const art = new Map();
-function dither(img, [x, y, w, h], pal) {
+const art = new Map();       // `${id}:${i}` → 160×104 art for the screen
+const images = new Map();    // `${id}:${i}` → the loaded screenshot
+const palettes = new Map();  // id → the cartridge's four tones
+const labels = new Map();    // label art, by size
+function dither(img, [x, y, w, h], pal, AW, AH) {
   const cv = document.createElement('canvas');
   cv.width = AW; cv.height = AH;
   const g = cv.getContext('2d');
@@ -40,15 +43,30 @@ function dither(img, [x, y, w, h], pal) {
 export function prepare(carts) {
   for (const cart of carts) {
     const pal = [rgb(cart.screen), rgb(cart.color), mix(rgb(cart.color), rgb(CREAM), 0.55), rgb(CREAM)];
+    palettes.set(cart.id, pal);
     cart.shots.forEach((shot, i) => {
       const key = `${cart.id}:${i}`;
       if (art.has(key)) return;
       art.set(key, null);
       const img = new Image();
-      img.onload = () => art.set(key, dither(img, shot.crop, pal));
+      img.onload = () => { images.set(key, img); art.set(key, dither(img, shot.crop, pal, AW, AH)); };
       img.src = shot.src;
     });
   }
+}
+
+// the first screenshot, dithered at another size for the cartridge's label (null until loaded)
+export function labelArt(cart, w, h) {
+  const key = `${cart.id}:${w}x${h}`;
+  if (labels.has(key)) return labels.get(key);
+  const img = images.get(`${cart.id}:0`);
+  if (!img) return null;
+  const [x, y, cw, ch] = cart.shots[0].crop, a = w / h;
+  let nw = cw, nh = cw / a;
+  if (nh > ch) { nh = ch; nw = ch * a; }
+  const cv = dither(img, [x + (cw - nw) / 2, y + (ch - nh) / 2, nw, nh], palettes.get(cart.id), w, h);
+  labels.set(key, cv);
+  return cv;
 }
 
 export function makeScreen() {

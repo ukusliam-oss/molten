@@ -72,8 +72,7 @@ export function controller(hero) {
     s.slotAt = now();
     hero.flipTo(false);
     hero.show(contentFor(CARTRIDGES[s.index], s.index));
-    hero.insert(CARTRIDGES[s.index]);
-    hero.splash();
+    hero.insert(CARTRIDGES[s.index]);   // it clicks home with its own splash of ink
     sfx.slot();
   }
 
@@ -214,7 +213,9 @@ export function controller(hero) {
     }
     const hit = hero.pick(e.clientX, e.clientY);
     canvas.style.cursor = hit === 'shell' ? 'grab' : hit ? 'pointer' : '';
+    hero.hoverCart(hit === 'cart' && s.mode === 'cart');   // a seated cartridge lifts to show its label
   }, { passive: true });
+  canvas.addEventListener('pointerleave', () => hero.hoverCart(false));
   function endDrag() {
     if (!drag) return;
     drag = null;

@@ -65,3 +65,4 @@ export const CARTRIDGES = [
     url: null, repo: null,
   },
 ];
+CARTRIDGES.forEach((cart, i) => { cart.index = i; });
