@@ -152,7 +152,7 @@ export function hero(section) {
     c.fillText('A SMALL STUDIO FOR WEBSITES THAT MOVE LIKE LIQUID.', x0 + s * 0.03, base + small * 2.4);
     c.fillText('3D · INTERACTION · MOTION', pad, H - pad);
     c.textAlign = 'right';
-    c.fillText('SCROLL TO STIR ↓', W - pad, H - pad);
+    c.fillText('MOVE TO STIR', W - pad, H - pad);
     c.textAlign = 'left';
     typeTex.needsUpdate = true;
   }
@@ -233,12 +233,11 @@ export function hero(section) {
       blobs[i++].set(d.x, d.y, r > R * 0.1 ? r : 0);
     }
 
-    // the handheld leans toward the pointer and lifts away as you scroll
-    const scroll = clamp(-rect.top / H);
+    // the handheld leans toward the pointer
     tilt.y = damp(tilt.y, pointer.nx * 0.45 + Math.sin(t * 0.5) * 0.12, 3, dt);
     tilt.x = damp(tilt.x, -pointer.ny * 0.3 + Math.sin(t * 0.7) * 0.06, 3, dt);
-    device.group.rotation.set(tilt.x + scroll * 0.7, tilt.y, 0.06 + Math.sin(t * 0.4) * 0.03);
-    device.group.position.y = baseY + Math.sin(t * 1.1) * 0.05 + scroll * 1.2;
+    device.group.rotation.set(tilt.x, tilt.y, 0.06 + Math.sin(t * 0.4) * 0.03);
+    device.group.position.y = baseY + Math.sin(t * 1.1) * 0.05;
     device.screen.material.uniforms.uTime.value = t;
 
     renderer.render(scene, camera);

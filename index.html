@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Molten — interactive web studio</title>
-<meta name="description" content="Molten is a small studio for websites that move like liquid: 3D storytelling, interactive sites and motion systems.">
+<meta name="description" content="Molten is a small studio for websites that move like liquid.">
 <meta name="theme-color" content="#ffb41f">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@300;400;500;600;700;800;900&family=Mr+Dafoe&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@600;900&family=Mr+Dafoe&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 { "imports": {
@@ -32,87 +32,18 @@
     </svg>
   </a>
   <nav class="nav__links" aria-label="Sections">
-    <a class="pill" href="#studio">Studio</a>
-    <a class="pill" href="#work">Work</a>
-    <a class="pill" href="#contact">Contact</a>
+    <a class="pill" href="#top">Studio</a>
+    <a class="pill" href="#top">Work</a>
+    <a class="pill" href="#top">Contact</a>
   </nav>
 </header>
 
 <main>
-  <!-- 1 · Buttermax: ink cursor + see-through handheld -->
   <section class="hero" id="top">
     <canvas class="hero__gl" aria-hidden="true"></canvas>
     <h1 class="sr-only">Molten — a small studio for websites that move like liquid</h1>
   </section>
-
-  <!-- 2 · Lusion: a pile of 3D pipe crosses you can shove around -->
-  <section class="studio" id="studio">
-    <div class="studio__top">
-      <span class="label">(01) Studio</span>
-      <h2 class="studio__title">We pour 3D storytelling and interactive web experiences that keep brands from being scrolled past</h2>
-      <a class="talk" href="#contact">Let's talk <i></i></a>
-    </div>
-    <div class="studio__stage">
-      <canvas class="studio__gl" aria-label="A pile of 3D crosses that scatter when you move through them"></canvas>
-    </div>
-    <div class="studio__foot"><span>+</span><span>Move through the pile</span><span>+</span></div>
-    <ul class="services">
-      <li><span class="label">01</span><h3>3D storytelling</h3><p>Product renders and whole worlds that run in the browser instead of a video file.</p></li>
-      <li><span class="label">02</span><h3>Interactive sites</h3><p>Pages you can touch: cursor, scroll and sound wired into the layout.</p></li>
-      <li><span class="label">03</span><h3>Motion systems</h3><p>One motion language your whole team can reuse across launches.</p></li>
-    </ul>
-  </section>
-
-  <!-- 3 · MANA: the can rises, tips over, and turns into a flavour picker -->
-  <section class="soda" id="work">
-    <div class="soda__pin">
-      <svg class="soda__wave" viewBox="0 0 800 170" preserveAspectRatio="none" aria-hidden="true"><path d="M0 0H800V16C708 40 640 20 560 48C444 88 380 32 262 74C170 106 92 94 0 150Z" fill="currentColor"/></svg>
-
-      <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-        <symbol id="flower" viewBox="0 0 100 100"><g style="fill:var(--c);transition:fill .6s"><circle cx="50" cy="26" r="21"/><circle cx="74.7" cy="44" r="21"/><circle cx="65.3" cy="73" r="21"/><circle cx="34.7" cy="73" r="21"/><circle cx="25.3" cy="44" r="21"/></g><circle cx="50" cy="52" r="11" fill="#fff8ee"/></symbol>
-        <symbol id="leaf" viewBox="0 0 100 100"><path d="M12 88C10 40 45 8 92 10C90 58 58 92 12 88Z" style="fill:var(--c);transition:fill .6s"/><path d="M15 85C40 60 60 40 88 13" stroke="rgb(0 0 0 / .18)" stroke-width="3" fill="none"/></symbol>
-        <symbol id="slice" viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" style="fill:var(--c);transition:fill .6s"/><circle cx="50" cy="50" r="38" fill="#fbf6d0"/><path d="M50 15v70M15 50h70M25 25l50 50M75 25l-50 50" style="stroke:var(--c);transition:stroke .6s" stroke-width="3.5"/></symbol>
-        <symbol id="cloud" viewBox="0 0 120 70"><path d="M20 62a18 18 0 0 1 2-36 26 26 0 0 1 48-8 20 20 0 0 1 32 14 15 15 0 0 1-2 30Z" fill="#fff" opacity=".9"/></symbol>
-        <symbol id="spark" viewBox="0 0 100 100"><path d="M50 0C54 36 64 46 100 50 64 54 54 64 50 100 46 64 36 54 0 50 36 46 46 36 50 0Z" style="fill:var(--c);transition:fill .6s"/></symbol>
-      </svg>
-
-      <div class="soda__deco" aria-hidden="true">
-        <i class="deco" style="left:3%;top:12%;width:18vmin;--c:var(--d1);--d:7s"><svg viewBox="0 0 100 100"><use href="#flower"/></svg></i>
-        <i class="deco" style="left:9%;top:45%;width:12vmin;--c:var(--d3);--d:5.5s"><svg viewBox="0 0 100 100"><use href="#leaf"/></svg></i>
-        <i class="deco" style="left:13%;top:66%;width:13vmin;--c:var(--d2);--d:6.5s"><svg viewBox="0 0 100 100"><use href="#flower"/></svg></i>
-        <i class="deco" style="left:29%;top:17%;width:5vmin;--c:var(--d1);--d:4s"><svg viewBox="0 0 100 100"><use href="#spark"/></svg></i>
-        <i class="deco" style="right:15%;top:21%;width:11vmin;--c:var(--d2);--d:6s"><svg viewBox="0 0 100 100"><use href="#flower"/></svg></i>
-        <i class="deco" style="right:-3%;top:15%;width:20vmin;--d:9s"><svg viewBox="0 0 120 70"><use href="#cloud"/></svg></i>
-        <i class="deco" style="right:21%;top:46%;width:11vmin;--c:var(--d3);--d:5s"><svg viewBox="0 0 100 100"><use href="#slice"/></svg></i>
-        <i class="deco" style="right:5%;top:63%;width:15vmin;--c:var(--d3);--d:7.5s"><svg viewBox="0 0 100 100"><use href="#leaf"/></svg></i>
-      </div>
-
-      <canvas class="soda__gl" aria-hidden="true"></canvas>
-
-      <div class="soda__intro">
-        <h2>A studio? A soda?<br>What are we talking about?</h2>
-        <p>(we made a drink to prove a point)</p>
-      </div>
-
-      <div class="soda__picker">
-        <button class="round" data-dir="-1" aria-label="Previous flavour"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></button>
-        <span class="flavour" aria-live="polite">Melon &amp; Mint</span>
-        <button class="round" data-dir="1" aria-label="Next flavour"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-      </div>
-    </div>
-  </section>
 </main>
-
-<footer class="contact" id="contact">
-  <span class="label">(03) Contact</span>
-  <h2 class="contact__title">Got something<br><em>that should melt?</em></h2>
-  <a class="contact__cta" href="mailto:hello@example.com">Start a project <span aria-hidden="true">→</span></a>
-  <div class="contact__row">
-    <span>© 2026 Molten</span>
-    <span>Instagram · Dribbble · LinkedIn</span>
-    <span>Remote, worldwide</span>
-  </div>
-</footer>
 
 <script type="module" src="js/main.js"></script>
 </body>
