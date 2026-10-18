@@ -1,28 +1,50 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { pointer, watch, makeRenderer, studioLight, damp, clamp, rng } from './util.js';
+import { pointer, watch, makeRenderer, studioLight, damp, clamp, ease, rng } from './util.js';
+import { paintType } from './type.js';
+import { makeScreen } from './screen.js';
 
-// Buttermax-style hero: black ink chases the cursor across a butter-yellow page and
-// inverts the type it covers, while a see-through handheld floats in the middle.
-// The ink is a metaball field drawn on a backdrop plane inside the same scene, so the
-// glass shell refracts it.
+// Buttermax-style hero: black ink chases the cursor across a butter-yellow page while a
+// see-through handheld floats in the middle. The handheld is the site's controller: its buttons
+// press, its screen is a pixel display, and cartridges drop into its slot. The ink is a metaball
+// field drawn on a backdrop plane inside the same scene, so the glass shell refracts it.
 
 const DROPS = 28;
 const NB = DROPS + 4;          // main blob + 3 satellites + trailing droplets
 const PLANE_Z = -1.5;
+const MELT_TIME = 0.9;
+const SLOT_Y = 1.48;           // cartridge centre when seated: 0.38 sticks out of the top
+const SLOT_OUT = 3;            // lift that takes it out of view
 
 const vertex = /* glsl */`
 varying vec2 vUv;
 void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 
 const inkFragment = /* glsl */`
-uniform sampler2D uType;
+uniform sampler2D uBaseA;
+uniform sampler2D uBaseB;
+uniform sampler2D uHideA;
+uniform sampler2D uHideB;
+uniform float uMorph;
 uniform vec2 uSize;
 uniform vec3 uBlobs[NB];
 uniform vec3 uPaper;
 uniform vec3 uInk;
 uniform vec3 uCream;
 varying vec2 vUv;
+
+float hash(float n) { return fract(sin(n) * 43758.5453); }
+float noise(float x) { float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(hash(i), hash(i + 1.0), f); }
+
+// one layer of type melting from A into B: each column drips away at its own moment
+// while the next type pours in from just above
+float melt(sampler2D a, sampler2D b, vec2 uv) {
+  float n = noise(uv.x * 18.0) * 0.6 + noise(uv.x * 63.0) * 0.4;
+  float p = clamp(uMorph * 1.7 - n * 0.7, 0.0, 1.0);
+  float gone = texture2D(a, uv + vec2(0.0, p * p * 0.45)).a * (1.0 - smoothstep(0.35, 0.9, p));
+  float come = texture2D(b, uv - vec2(0.0, (1.0 - p) * (1.0 - p) * 0.12)).a * smoothstep(0.25, 0.85, p);
+  return max(gone, come);
+}
 
 void main() {
   vec2 p = vUv * uSize;
@@ -37,15 +59,15 @@ void main() {
   float w = fwidth(lf) * 0.75;
   float ink = smoothstep(-w, w, lf);
 
-  // inside the ink the type is bent toward the edge, like looking through a drop
+  // inside the ink the hidden layer is bent toward the edge, like looking through a drop
   vec2 grad = vec2(dFdx(lf), dFdy(lf));
   float lens = (1.0 - smoothstep(0.0, 0.95, lf)) * ink;
   vec2 shift = normalize(grad + 1e-5) * lens * 14.0 / uSize;
 
-  float base = texture2D(uType, vUv).a;
-  float bent = texture2D(uType, vUv + shift).a;
+  float base = melt(uBaseA, uBaseB, vUv);
+  float hidden = melt(uHideA, uHideB, vUv + shift);
   vec3 col = mix(uPaper, uInk, base);
-  col = mix(col, mix(uInk, uCream, bent), ink);
+  col = mix(col, mix(uInk, uCream, hidden), ink);
 
   // a thin wet rim just inside the edge
   float rim = ink - smoothstep(w * 2.0, w * 5.0, lf);
@@ -57,22 +79,22 @@ void main() {
 
 const screenFragment = /* glsl */`
 uniform float uTime;
+uniform sampler2D uUI;
 varying vec2 vUv;
 void main() {
-  vec2 cell = vec2(48.0, 36.0);
-  vec2 q = (floor(vUv * cell) + 0.5) / cell;
+  vec2 q = (floor(vUv * vec2(80.0, 72.0)) + 0.5) / vec2(80.0, 72.0);
   float t = uTime * 0.35;
   float v = sin(q.x * 7.0 + t * 2.0) + sin(q.y * 9.0 - t * 1.7);
   v += sin(length(q - vec2(0.5 + 0.3 * sin(t), 0.5 + 0.3 * cos(t * 1.3))) * 16.0 - t * 3.0);
   vec3 col = 0.55 + 0.45 * cos(6.2831 * (v * 0.16 + vec3(0.0, 0.33, 0.67)));
-  col = mix(col, vec3(1.0, 0.86, 0.78), 0.3);
-  vec2 g = fract(vUv * cell);
-  col *= 0.86 + 0.14 * step(0.12, g.x) * step(0.12, g.y);
-  gl_FragColor = vec4(pow(col, vec3(2.2)), 1.0);
+  col = pow(mix(col, vec3(1.0, 0.86, 0.78), 0.3), vec3(2.2));
+  vec4 ui = texture2D(uUI, vUv);
+  col = mix(col, ui.rgb, step(0.5, ui.a));
+  gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>
 }`;
 
-export function hero(section) {
+export function hero(section, initial) {
   const canvas = section.querySelector('canvas');
   const seen = watch(section);
   const renderer = makeRenderer(canvas, { maxDpr: 1.5 });
@@ -84,29 +106,38 @@ export function hero(section) {
   sun.position.set(-3, 4, 6);
   scene.add(sun);
 
-  // ---- ink + type backdrop
+  // ---- type: what you see (base) and what only the ink shows (hide); A is current, B is next
+  const layer = () => { const c = document.createElement('canvas'); return { canvas: c, tex: new THREE.CanvasTexture(c) }; };
+  let baseA = layer(), baseB = layer(), hideA = layer(), hideB = layer();
   const blobs = Array.from({ length: NB }, () => new THREE.Vector3());
-  const type = document.createElement('canvas');
-  const typeTex = new THREE.CanvasTexture(type);
+  const uniforms = {
+    uBaseA: { value: baseA.tex }, uBaseB: { value: baseB.tex },
+    uHideA: { value: hideA.tex }, uHideB: { value: hideB.tex },
+    uMorph: { value: 0 },
+    uSize: { value: new THREE.Vector2(1, 1) },
+    uBlobs: { value: blobs },
+    uPaper: { value: new THREE.Color('#ffb41f') },
+    uInk: { value: new THREE.Color('#0e0e0e') },
+    uCream: { value: new THREE.Color('#fff1dc') },
+  };
   const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShaderMaterial({
-    defines: { NB },
-    uniforms: {
-      uType: { value: typeTex },
-      uSize: { value: new THREE.Vector2(1, 1) },
-      uBlobs: { value: blobs },
-      uPaper: { value: new THREE.Color('#ffb41f') },
-      uInk: { value: new THREE.Color('#0e0e0e') },
-      uCream: { value: new THREE.Color('#fff1dc') },
-    },
-    vertexShader: vertex,
-    fragmentShader: inkFragment,
+    defines: { NB }, uniforms, vertexShader: vertex, fragmentShader: inkFragment,
   }));
   backdrop.position.z = PLANE_Z;
   scene.add(backdrop);
 
-  // ---- the handheld
+  // ---- the handheld, its screen and its cartridge
   const device = buildDevice();
   scene.add(device.group);
+  const screen = makeScreen();
+  device.screen.material.uniforms.uUI.value = screen.tex;
+  const cart = buildCart();
+  cart.group.position.set(0, SLOT_Y + SLOT_OUT, -0.21);
+  device.group.add(cart.group);
+  const slot = { lift: SLOT_OUT, v: 0, target: SLOT_OUT, next: null, current: null };
+
+  // shared with the controller and the screen
+  const state = { mode: 'home', index: -1, cursor: 0, carts: [], toast: null, toastUntil: 0, flashUntil: 0 };
 
   let W = 1, H = 1, baseY = 0;
   const main = { x: 0, y: 0, vx: 0, vy: 0 };
@@ -114,47 +145,39 @@ export function hero(section) {
   const drops = Array.from({ length: DROPS }, () => ({ x: 0, y: 0, vx: 0, vy: 0, r: 0, life: 0 }));
   let head = 0, travelled = 0;
   const tilt = { x: 0, y: 0 };
+  const pressed = {};
 
-  function drawType() {
-    const dpr = Math.min(devicePixelRatio, 2);
-    type.width = Math.round(W * dpr);
-    type.height = Math.round(H * dpr);
-    const c = type.getContext('2d');
-    c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c.clearRect(0, 0, W, H);
-    c.fillStyle = '#000';
-    const spacing = v => { if ('letterSpacing' in c) c.letterSpacing = v + 'px'; };
-    const heavy = s => `900 ${s}px "Inter Tight", "Helvetica Neue", Arial, sans-serif`;
-    const brush = s => `400 ${s * 1.32}px "Mr Dafoe", "Snell Roundhand", cursive`;
-    const widths = s => {
-      c.font = heavy(s); spacing(-s * 0.055);
-      const a = c.measureText('Mol').width;
-      c.font = brush(s); spacing(0);
-      return [a, c.measureText('ten').width];
-    };
-
-    // wordmark: heavy grotesk + brush script, sized to the width like Buttermax
-    const pad = clamp(W * 0.04, 16, 56);
-    let [a, b] = widths(100);
-    const s = Math.min((W - pad * 2) / (a + b - 4) * 94, H * 0.4);   // the brush tail overshoots its measured width
-    [a, b] = widths(s);
-    const overlap = s * 0.04;
-    const x0 = (W - (a + b - overlap)) / 2;
-    const base = Math.max(76, H * 0.12) + s * 0.76;
-    c.font = heavy(s); spacing(-s * 0.055);
-    c.fillText('Mol', x0, base);
-    c.font = brush(s); spacing(0);
-    c.fillText('ten', x0 + a - overlap, base - s * 0.05);
-
-    const small = clamp(W * 0.0085, 10, 13);
-    c.font = `600 ${small}px "Inter Tight", Arial, sans-serif`;
-    spacing(small * 0.05);
-    c.fillText('A SMALL STUDIO FOR WEBSITES THAT MOVE LIKE LIQUID.', x0 + s * 0.03, base + small * 2.4);
-    c.fillText('3D · INTERACTION · MOTION', pad, H - pad);
-    c.textAlign = 'right';
-    c.fillText('MOVE TO STIR', W - pad, H - pad);
-    c.textAlign = 'left';
-    typeTex.needsUpdate = true;
+  // ---- melting between contents
+  let content = initial, next = null, melt = -1;   // melt < 0: idle
+  // three.js allocates fixed storage on a texture's first upload, so a canvas that changes size
+  // needs its texture released or the new pixels never reach the GPU
+  function paint(base, hide, c) {
+    for (const [l, hidden] of [[base, false], [hide, true]]) {
+      const w = l.canvas.width, h = l.canvas.height;
+      paintType(l.canvas, c, W, H, hidden);
+      if (l.canvas.width !== w || l.canvas.height !== h) l.tex.dispose();
+      l.tex.needsUpdate = true;
+    }
+  }
+  function bind() {
+    uniforms.uBaseA.value = baseA.tex; uniforms.uBaseB.value = baseB.tex;
+    uniforms.uHideA.value = hideA.tex; uniforms.uHideB.value = hideB.tex;
+    uniforms.uMorph.value = melt < 0 ? 0 : ease(melt);
+  }
+  // finish a running melt at once: B becomes the current layer
+  function settle() {
+    if (melt < 0) return;
+    [baseA, baseB] = [baseB, baseA];
+    [hideA, hideB] = [hideB, hideA];
+    content = next; next = null; melt = -1;
+    bind();
+  }
+  function show(c) {
+    settle();
+    next = c;
+    paint(baseB, hideB, c);
+    melt = 0;
+    bind();
   }
 
   function resize() {
@@ -165,7 +188,7 @@ export function hero(section) {
     const fov = THREE.MathUtils.degToRad(camera.fov / 2);
     const back = 2 * (camera.position.z - PLANE_Z) * Math.tan(fov);
     backdrop.scale.set(back * camera.aspect, back, 1);
-    backdrop.material.uniforms.uSize.value.set(W, H);
+    uniforms.uSize.value.set(W, H);
     const vh = 2 * camera.position.z * Math.tan(fov);
     device.group.scale.setScalar(Math.min(vh * 0.62 / 3.1, vh * camera.aspect * 0.7 / 2));
     baseY = -vh * 0.08;
@@ -173,10 +196,41 @@ export function hero(section) {
       main.x = W * 0.66; main.y = H * 0.42;
       for (const s of sats) { s.x = main.x; s.y = main.y; }
     }
-    drawType();
+    settle();
+    paint(baseA, hideA, content);
   }
   new ResizeObserver(resize).observe(section);
   resize();
+
+  // ---- picking buttons under the pointer
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  function pick(x, y) {
+    const r = canvas.getBoundingClientRect();
+    ndc.set((x - r.left) / r.width * 2 - 1, -((y - r.top) / r.height * 2 - 1));
+    ray.setFromCamera(ndc, camera);
+    const hit = ray.intersectObjects(device.targets, false)[0];
+    if (!hit) return null;
+    const name = hit.object.userData.button;
+    if (name !== 'dpad') return name;
+    const p = device.dpad.worldToLocal(hit.point.clone());
+    return Math.abs(p.x) > Math.abs(p.y) ? (p.x > 0 ? 'right' : 'left') : (p.y > 0 ? 'up' : 'down');
+  }
+
+  function insert(c) { slot.next = c; slot.target = SLOT_OUT; }
+  function eject() { slot.next = null; slot.target = SLOT_OUT; }
+  function press(name) { pressed[name] = 1; }
+  function splash() {
+    const R = Math.min(W, H) * 0.13;
+    for (let k = 0; k < 7; k++) {
+      const d = drops[head];
+      head = (head + 1) % DROPS;
+      const a = Math.random() * Math.PI * 2, speed = 400 + Math.random() * 500;
+      d.x = main.x; d.y = main.y;
+      d.vx = Math.cos(a) * speed; d.vy = Math.sin(a) * speed;
+      d.r = R * (0.2 + Math.random() * 0.15);
+      d.life = 1;
+    }
+  }
 
   function tick(t, dt) {
     if (!seen.on) return;
@@ -233,17 +287,48 @@ export function hero(section) {
       blobs[i++].set(d.x, d.y, r > R * 0.1 ? r : 0);
     }
 
+    // type melt
+    if (melt >= 0) {
+      melt += dt / MELT_TIME;
+      if (melt >= 1) settle(); else uniforms.uMorph.value = ease(melt);
+    }
+
+    // cartridge: rise out of view, swap, drop back in with a little bounce
+    if (slot.target === SLOT_OUT && slot.lift > SLOT_OUT - 0.4 && slot.next) {
+      cart.paint(slot.next);
+      slot.current = slot.next; slot.next = null;
+      slot.target = 0;
+    }
+    slot.v += ((slot.target - slot.lift) * 90 - slot.v * 12) * dt;
+    slot.lift += slot.v * dt;
+    cart.group.position.y = SLOT_Y + slot.lift;
+    cart.group.visible = slot.lift < SLOT_OUT - 0.1;
+
+    // buttons: quick press, spring back
+    for (const k in pressed) pressed[k] = Math.max(0, pressed[k] - dt * 6);
+    const amt = k => Math.min(1, (pressed[k] || 0) * 1.6);
+    device.dpad.rotation.y = (amt('right') - amt('left')) * 0.22;
+    device.dpad.rotation.x = (amt('down') - amt('up')) * 0.22;
+    for (const [k, b] of Object.entries(device.buttons)) b.obj.position.z = b.rest - 0.04 * amt(k);
+
     // the handheld leans toward the pointer
     tilt.y = damp(tilt.y, pointer.nx * 0.45 + Math.sin(t * 0.5) * 0.12, 3, dt);
     tilt.x = damp(tilt.x, -pointer.ny * 0.3 + Math.sin(t * 0.7) * 0.06, 3, dt);
     device.group.rotation.set(tilt.x, tilt.y, 0.06 + Math.sin(t * 0.4) * 0.03);
     device.group.position.y = baseY + Math.sin(t * 1.1) * 0.05;
-    device.screen.material.uniforms.uTime.value = t;
 
+    device.screen.material.uniforms.uTime.value = t;
+    screen.draw(state, t);
     renderer.render(scene, camera);
   }
-  tick.refresh = drawType;
-  return tick;
+
+  function refresh() {
+    settle();
+    paint(baseA, hideA, content);
+    if (slot.current) cart.paint(slot.current);
+  }
+
+  return { canvas, state, tick, refresh, pick, press, show, insert, eject, splash };
 }
 
 function buildDevice() {
@@ -283,47 +368,122 @@ function buildDevice() {
 
   const shellWhite = new THREE.MeshStandardMaterial({ color: '#f1ede7', roughness: 0.45 });
   const keyWhite = new THREE.MeshStandardMaterial({ color: '#e6e2db', roughness: 0.35 });
+  const targets = [];
+  const hit = (geo, button) => {
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial());
+    m.visible = false;              // raycasts still hit invisible meshes
+    m.userData.button = button;
+    targets.push(m);
+    return m;
+  };
 
-  // screen
+  // screen: 160×144 like a Game Boy
   const bezel = new THREE.Mesh(new RoundedBoxGeometry(1.62, 1.3, 0.05, 3, 0.02), shellWhite);
   bezel.position.set(0, 0.62, 0.02);
   group.add(bezel);
   const screen = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.36, 1.04),
-    new THREE.ShaderMaterial({ uniforms: { uTime: { value: 0 } }, vertexShader: vertex, fragmentShader: screenFragment }),
+    new THREE.PlaneGeometry(1.2, 1.08),
+    new THREE.ShaderMaterial({ uniforms: { uTime: { value: 0 }, uUI: { value: null } }, vertexShader: vertex, fragmentShader: screenFragment }),
   );
   screen.position.set(0, 0.62, 0.05);
+  screen.userData.button = 'screen';
+  targets.push(screen);
   group.add(screen);
 
-  // d-pad on a round seat
+  // d-pad on a round seat; it tilts toward the arm you press
   const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.03, 40), shellWhite);
   seat.rotation.x = Math.PI / 2;
   seat.position.set(-0.52, -0.62, 0.17);
   group.add(seat);
+  const dpad = new THREE.Group();
+  dpad.position.set(-0.52, -0.62, 0.2);
   for (const rot of [0, Math.PI / 2]) {
     const bar = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.16, 0.08, 2, 0.03), keyWhite);
     bar.rotation.z = rot;
-    bar.position.set(-0.52, -0.62, 0.2);
-    group.add(bar);
+    dpad.add(bar);
   }
+  const pad = hit(new THREE.CircleGeometry(0.34, 24), 'dpad');
+  pad.position.z = 0.05;
+  dpad.add(pad);
+  group.add(dpad);
 
-  // four face buttons
-  for (const [x, y] of [[0.52, -0.44], [0.7, -0.62], [0.52, -0.8], [0.34, -0.62]]) {
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.08, 28), keyWhite);
-    b.rotation.x = Math.PI / 2;
+  // face buttons in SNES order, each with its letter
+  const buttons = {};
+  for (const [id, x, y] of [['a', 0.7, -0.62], ['b', 0.52, -0.8], ['x', 0.52, -0.44], ['y', 0.34, -0.62]]) {
+    const b = new THREE.Group();
     b.position.set(x, y, 0.2);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.08, 28), keyWhite);
+    cap.rotation.x = Math.PI / 2;
+    const letter = new THREE.Mesh(
+      new THREE.CircleGeometry(0.07, 24),
+      new THREE.MeshStandardMaterial({ map: letterTexture(id.toUpperCase()), alphaTest: 0.5, roughness: 0.4 }),
+    );
+    letter.position.z = 0.041;
+    const h = hit(new THREE.CircleGeometry(0.12, 20), id);
+    h.position.z = 0.05;
+    b.add(cap, letter, h);
     group.add(b);
+    buttons[id] = { obj: b, rest: 0.2 };
   }
 
-  // start / select
-  for (const x of [-0.16, 0.16]) {
-    const s = new THREE.Mesh(new RoundedBoxGeometry(0.24, 0.07, 0.05, 2, 0.025), chipMats[1]);
-    s.position.set(x, -1.18, 0.19);
-    s.rotation.z = -0.4;
-    group.add(s);
+  // select / start
+  for (const [id, x] of [['select', -0.16], ['start', 0.16]]) {
+    const b = new THREE.Group();
+    b.position.set(x, -1.18, 0.19);
+    b.rotation.z = -0.4;
+    const h = hit(new THREE.PlaneGeometry(0.34, 0.2), id);
+    h.position.z = 0.03;
+    b.add(new THREE.Mesh(new RoundedBoxGeometry(0.24, 0.07, 0.05, 2, 0.025), chipMats[1]), h);
+    group.add(b);
+    buttons[id] = { obj: b, rest: 0.19 };
   }
 
-  return { group, screen };
+  return { group, screen, dpad, buttons, targets };
+}
+
+// a cartridge in the project's colour with a cream label on the part that sticks out
+function buildCart() {
+  const group = new THREE.Group();
+  const shell = new THREE.MeshStandardMaterial({ color: '#888888', roughness: 0.55 });
+  const labelCanvas = document.createElement('canvas');
+  labelCanvas.width = 512; labelCanvas.height = 128;
+  const labelTex = new THREE.CanvasTexture(labelCanvas);
+  labelTex.colorSpace = THREE.SRGBColorSpace;
+  labelTex.anisotropy = 4;
+  const label = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.325), new THREE.MeshStandardMaterial({ map: labelTex, roughness: 0.6 }));
+  label.position.set(0, 0.24, 0.061);
+  group.add(new THREE.Mesh(new RoundedBoxGeometry(1.5, 0.9, 0.12, 3, 0.04), shell), label);
+
+  function paint(cart) {
+    shell.color.set(cart.color);
+    const c = labelCanvas.getContext('2d');
+    c.fillStyle = '#fff1dc'; c.fillRect(0, 0, 512, 128);
+    c.fillStyle = cart.color; c.fillRect(0, 0, 512, 16);
+    c.fillStyle = '#0e0e0e';
+    c.textBaseline = 'middle';
+    c.font = '900 60px "Inter Tight", Arial, sans-serif';
+    c.textAlign = 'left';
+    c.fillText(cart.name.toUpperCase(), 24, 74);
+    c.font = '600 20px "Inter Tight", Arial, sans-serif';
+    c.textAlign = 'right';
+    c.fillText(cart.kind, 488, 74);
+    labelTex.needsUpdate = true;
+  }
+  return { group, paint };
+}
+
+function letterTexture(ch) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d');
+  x.fillStyle = '#8f897f';
+  x.font = '700 40px "Inter Tight", Arial, sans-serif';
+  x.textAlign = 'center';
+  x.textBaseline = 'middle';
+  x.fillText(ch, 32, 35);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }
 
 function traceTexture(rand) {
