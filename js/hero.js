@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { pointer, watch, makeRenderer, studioLight, damp, clamp, ease, rng } from './util.js';
-import { paintType } from './type.js';
+import { paintType, typeBottom } from './type.js';
 import { makeScreen, labelArt } from './screen.js';
 import { makeFluid } from './fluid.js';
 import { sfx } from './sound.js';
@@ -160,11 +160,11 @@ void main() {
     uv = (cell + 0.5 + vec2(tear, 0.0)) * size / uRes;
   }
 
-  // chromatic split: a hair everywhere, more near a fast pointer and inside the pixels
+  // chromatic split only while something moves: near a fast pointer, and inside the pixels
   vec2 dir = uv - uMouse;
   float dist = length(dir);
   dir /= max(dist, 1e-4);
-  float amt = 0.0003 + uSpeed * 0.0022 * smoothstep(0.45, 0.0, dist) + glitch * 0.0025;
+  float amt = uSpeed * 0.0022 * smoothstep(0.45, 0.0, dist) + glitch * 0.0025;
   vec3 c = vec3(texture2D(tScene, uv + dir * amt).r, texture2D(tScene, uv).g, texture2D(tScene, uv - dir * amt).b);
 
   c = mix(c, aces(c), texture2D(tMask, uv).r);
@@ -179,7 +179,7 @@ void main() {
 export function hero(section, initial) {
   const canvas = section.querySelector('canvas');
   const seen = watch(section);
-  const renderer = makeRenderer(canvas, { maxDpr: 1.5 });
+  const renderer = makeRenderer(canvas, { maxDpr: 2 });   // full Retina: at 1.5 the console was drawn at 75% and stretched
   renderer.toneMapping = THREE.NoToneMapping;   // tone mapping happens in the composite, on the console only
   const scene = new THREE.Scene();
   scene.environment = studioLight(renderer);
@@ -298,7 +298,7 @@ export function hero(section, initial) {
     renderer.setSize(W, H, false);
     renderer.getDrawingBufferSize(buffer);
     mainRT.setSize(buffer.x, buffer.y);
-    maskRT.setSize(Math.max(1, buffer.x >> 1), Math.max(1, buffer.y >> 1));
+    maskRT.setSize(buffer.x, buffer.y);   // full size, so the console's edges keep their own colour
     composite.uniforms.uRes.value.copy(buffer);
     composite.uniforms.uDpr.value = renderer.getPixelRatio();
     screenU.uView.value.copy(buffer);
@@ -309,8 +309,19 @@ export function hero(section, initial) {
     const back = 2 * (camera.position.z - PLANE_Z) * Math.tan(fov);
     backdrop.scale.set(back * camera.aspect, back, 1);
     const vh = 2 * camera.position.z * Math.tan(fov);
-    device.group.scale.setScalar(Math.min(vh * 0.6 / 3.1, vh * camera.aspect * 0.7 / 2));
+    let scale = Math.min(vh * 0.6 / 3.1, vh * camera.aspect * 0.7 / 2);
     baseY = -vh * 0.1;
+    // on narrow screens the console would sit on the title's line of text: put the seated cartridge's top
+    // just under it, and shrink the console if it would then run into the corner labels
+    if (camera.aspect < 1.15) {
+      const ppu = H / vh;
+      const reach = SLOT_TOP + SHOW + 0.05;
+      const under = vh / 2 - (typeBottom(W, H) + 16) / ppu;
+      const floor = -vh / 2 + 46 / ppu;
+      scale = Math.min(scale, (under - floor) / (reach + 1.6));
+      baseY = under - reach * scale;
+    }
+    device.group.scale.setScalar(scale);
     settle();
     paint(baseA, hideA, content);
   }
@@ -527,38 +538,52 @@ export function hero(section, initial) {
 function buildDevice() {
   const group = new THREE.Group();
   const rand = rng(7);
-  const W = 2.0, H = 3.1, D = 0.42;
+  const W = 2.0, H = 3.1, D = 0.42, F = D / 2;   // F: the front surface of the shell
 
-  // translucent, slightly pink, iridescent shell; grabbing it turns the console over
+  // clear, slightly pink, iridescent shell — nearly polished, so the board inside reads sharp
+  // through it (rough glass is sampled from a blurred mip of the scene behind it)
   const shell = new THREE.Mesh(
-    new RoundedBoxGeometry(W, H, D, 6, 0.16),
+    new RoundedBoxGeometry(W, H, D, 10, 0.16),
     new THREE.MeshPhysicalMaterial({
-      color: '#ffe6ee', transmission: 1, roughness: 0.1, thickness: 0.3, ior: 1.35,
+      color: '#ffe9f0', transmission: 1, roughness: 0.015, thickness: 0.18, ior: 1.38,
       iridescence: 1, iridescenceIOR: 1.25, iridescenceThicknessRange: [120, 420],
-      clearcoat: 0.5, clearcoatRoughness: 0.08, envMapIntensity: 0.45,
+      clearcoat: 0.6, clearcoatRoughness: 0.04, envMapIntensity: 0.45,
     }),
   );
   shell.userData.button = 'shell';
   group.add(shell);
 
-  // circuit board with gold traces
+  // the board: traces, vias, pads and silkscreen
   const pcb = new THREE.Mesh(
     new THREE.BoxGeometry(W - 0.22, H - 0.22, 0.04),
-    new THREE.MeshStandardMaterial({ map: traceTexture(rand), roughness: 0.55, metalness: 0.3 }),
+    new THREE.MeshStandardMaterial({ map: traceTexture(rand), roughness: 0.5, metalness: 0.25 }),
   );
   pcb.position.z = -0.12;
   group.add(pcb);
 
-  const chipMats = [
-    new THREE.MeshStandardMaterial({ color: '#18181a', roughness: 0.4 }),
-    new THREE.MeshStandardMaterial({ color: '#b9b9be', metalness: 1, roughness: 0.3 }),
-    new THREE.MeshStandardMaterial({ color: '#c8a24c', metalness: 1, roughness: 0.35 }),
-  ];
+  // parts on the board: marked chips, silver cans, gold crystals and a scatter of passives
+  const black = new THREE.MeshStandardMaterial({ color: '#141416', roughness: 0.45 });
+  const silver = new THREE.MeshStandardMaterial({ color: '#c3c3c8', metalness: 1, roughness: 0.28 });
+  const goldM = new THREE.MeshStandardMaterial({ color: '#cfa64e', metalness: 1, roughness: 0.32 });
+  const tan = new THREE.MeshStandardMaterial({ color: '#b68a52', roughness: 0.5 });
+  const marks = ['MLT-8B', 'MOLTEN', 'INK·01', 'SRAM 64K', 'LCD DRV', 'APU 2A'].map(t => chipTexture(t, rand));
   for (let i = 0; i < 18; i++) {
     const w = 0.08 + rand() * 0.3, h = 0.08 + rand() * 0.25, d = 0.03 + rand() * 0.07;
-    const chip = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), chipMats[rand() < 0.65 ? 0 : rand() < 0.6 ? 1 : 2]);
+    const k = rand();
+    let mat = k < 0.65 ? black : k < 0.86 ? silver : goldM;
+    if (mat === black && w > 0.18 && h > 0.12) {   // a printed face on the bigger chips
+      const face = new THREE.MeshStandardMaterial({ map: marks[i % marks.length], roughness: 0.45 });
+      mat = [black, black, black, black, face, black];
+    }
+    const chip = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
     chip.position.set((rand() - 0.5) * (W - 0.6), -1.35 + rand() * 1.3, -0.1 + d / 2);
     group.add(chip);
+  }
+  for (let i = 0; i < 40; i++) {
+    const p = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.025, 0.02), rand() < 0.6 ? tan : black);
+    p.position.set((rand() - 0.5) * (W - 0.4), -1.42 + rand() * 1.45, -0.09);
+    p.rotation.z = rand() < 0.5 ? 0 : Math.PI / 2;
+    group.add(p);
   }
 
   const shellWhite = new THREE.MeshStandardMaterial({ color: '#f1ede7', roughness: 0.45 });
@@ -571,10 +596,13 @@ function buildDevice() {
     targets.push(m);
     return m;
   };
+  // decals printed on the clear case
+  const print = (tex, w, h) => new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: tex, transparent: true, roughness: 0.4, depthWrite: false }));
 
-  // screen: 160×144 like a Game Boy
-  const bezel = new THREE.Mesh(new RoundedBoxGeometry(1.62, 1.3, 0.05, 3, 0.02), shellWhite);
-  bezel.position.set(0, 0.62, 0.02);
+  // screen: 160×144 like a Game Boy, set on the front surface (not behind the glass, which would refract
+  // and soften it), in a printed bezel with the power LED
+  const bezel = new THREE.Mesh(new RoundedBoxGeometry(1.62, 1.3, 0.03, 4, 0.03), new THREE.MeshStandardMaterial({ map: bezelTexture(), roughness: 0.5 }));
+  bezel.position.set(0, 0.62, F + 0.005);
   group.add(bezel);
   const screen = new THREE.Mesh(
     new THREE.PlaneGeometry(1.2, 1.08),
@@ -583,21 +611,33 @@ function buildDevice() {
       vertexShader: vertex, fragmentShader: screenFragment,
     }),
   );
-  screen.position.set(0, 0.62, 0.05);
+  screen.position.set(0, 0.62, F + 0.0205);
   group.add(screen);
-  const glass = hit(new THREE.PlaneGeometry(1.3, 1.16), 'screen');   // in front of the shell, which would catch the ray first
-  glass.position.set(0, 0.62, 0.23);
+  const glass = hit(new THREE.PlaneGeometry(1.3, 1.16), 'screen');
+  glass.position.set(0, 0.62, F + 0.03);
   group.add(glass);
+  const led = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.028, 0.028, 0.01, 24),
+    new THREE.MeshStandardMaterial({ color: '#ff3b30', emissive: '#ff2418', emissiveIntensity: 2.4, roughness: 0.3 }),
+  );
+  led.rotation.x = Math.PI / 2;
+  led.position.set(-0.705, 0.86, F + 0.022);
+  group.add(led);
+
+  // the maker's mark under the screen, like "GAME BOY" on the original
+  const logo = print(logoTexture(), 1.24, 0.2);
+  logo.position.set(0, -0.155, F + 0.002);
+  group.add(logo);
 
   // d-pad on a round seat; it tilts toward the arm you press
-  const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.03, 40), shellWhite);
+  const seat = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.03, 64), shellWhite);
   seat.rotation.x = Math.PI / 2;
-  seat.position.set(-0.52, -0.62, 0.17);
+  seat.position.set(-0.52, -0.62, F - 0.005);
   group.add(seat);
   const dpad = new THREE.Group();
-  dpad.position.set(-0.52, -0.62, 0.2);
+  dpad.position.set(-0.52, -0.62, F + 0.015);
   for (const rot of [0, Math.PI / 2]) {
-    const bar = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.16, 0.08, 2, 0.03), keyWhite);
+    const bar = new THREE.Mesh(new RoundedBoxGeometry(0.5, 0.16, 0.08, 4, 0.03), keyWhite);
     bar.rotation.z = rot;
     dpad.add(bar);
   }
@@ -610,11 +650,11 @@ function buildDevice() {
   const buttons = {};
   for (const [id, x, y] of [['a', 0.7, -0.62], ['b', 0.52, -0.8], ['x', 0.52, -0.44], ['y', 0.34, -0.62]]) {
     const b = new THREE.Group();
-    b.position.set(x, y, 0.2);
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.08, 28), keyWhite);
+    b.position.set(x, y, F + 0.012);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.08, 48), keyWhite);
     cap.rotation.x = Math.PI / 2;
     const letter = new THREE.Mesh(
-      new THREE.CircleGeometry(0.07, 24),
+      new THREE.CircleGeometry(0.07, 32),
       new THREE.MeshStandardMaterial({ map: letterTexture(id.toUpperCase()), alphaTest: 0.5, roughness: 0.4 }),
     );
     letter.position.z = 0.041;
@@ -622,27 +662,53 @@ function buildDevice() {
     h.position.z = 0.05;
     b.add(cap, letter, h);
     group.add(b);
-    buttons[id] = { obj: b, rest: 0.2 };
+    buttons[id] = { obj: b, rest: F + 0.012 };
   }
 
-  // select / start
+  // select / start, with their names printed under them
   for (const [id, x] of [['select', -0.16], ['start', 0.16]]) {
     const b = new THREE.Group();
-    b.position.set(x, -1.18, 0.19);
+    b.position.set(x, -1.18, F + 0.008);
     b.rotation.z = -0.4;
     const h = hit(new THREE.PlaneGeometry(0.34, 0.2), id);
     h.position.z = 0.03;
-    b.add(new THREE.Mesh(new RoundedBoxGeometry(0.24, 0.07, 0.05, 2, 0.025), chipMats[1]), h);
+    b.add(new THREE.Mesh(new RoundedBoxGeometry(0.24, 0.07, 0.05, 4, 0.025), silver), h);
     group.add(b);
-    buttons[id] = { obj: b, rest: 0.19 };
+    buttons[id] = { obj: b, rest: F + 0.008 };
+    const name = print(wordTexture(id.toUpperCase()), 0.3, 0.06);
+    name.position.set(x - Math.sin(0.4) * 0.09, -1.18 - Math.cos(0.4) * 0.09, F + 0.002);
+    name.rotation.z = -0.4;
+    group.add(name);
   }
 
-  // the back, seen when the console is turned over: a label, kept below a seated cartridge (y < 0.57)
+  // the speaker grille, bottom right
+  const slotMat = new THREE.MeshStandardMaterial({ color: '#0c0c0e', roughness: 0.6 });
+  for (let i = 0; i < 6; i++) {
+    const s = new THREE.Mesh(new RoundedBoxGeometry(0.045, 0.26, 0.012, 2, 0.02), slotMat);
+    s.position.set(0.36 + i * 0.07, -1.12 - i * 0.03, F + 0.003);   // clear of the rounded corner
+    s.rotation.z = 0.5;
+    group.add(s);
+  }
+
+  // the back, seen when the console is turned over: four screws and a label kept below a seated
+  // cartridge (y < 0.57)
   const label = stickerTexture();
   const sticker = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.5), new THREE.MeshStandardMaterial({ map: label.tex, roughness: 0.7 }));
-  sticker.position.set(0, -0.28, -0.218);
+  sticker.position.set(0, -0.28, -F - 0.008);
   sticker.rotation.y = Math.PI;
   group.add(sticker);
+  const slot = new THREE.MeshStandardMaterial({ color: '#3a3a3e', roughness: 0.5 });
+  for (const [x, y] of [[-0.78, 0.4], [0.78, 0.4], [-0.78, -1.3], [0.78, -1.3]]) {
+    const screw = new THREE.Group();
+    const headM = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.014, 32), silver);
+    headM.rotation.x = Math.PI / 2;
+    const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.012, 0.006), slot);
+    const c2 = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.07, 0.006), slot);
+    c1.position.z = c2.position.z = -0.008;
+    screw.add(headM, c1, c2);
+    screw.position.set(x, y, -F - 0.006);
+    group.add(screw);
+  }
 
   // the buttons go on layer 1 too, so the mask can keep them out of the ink's pixelation
   for (const obj of [seat, dpad, ...Object.values(buttons).map(b => b.obj)]) {
@@ -652,14 +718,95 @@ function buildDevice() {
   return { group, screen, dpad, buttons, targets, repaint: label.paint };
 }
 
-function stickerTexture() {
+// a 2× canvas texture drawn in logical units
+function canvasTexture(w, h, draw, scale = 2) {
   const c = document.createElement('canvas');
-  c.width = 512; c.height = 640;
+  c.width = w * scale; c.height = h * scale;
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  function paint() {
+  tex.anisotropy = 8;
+  const paint = () => {
     const x = c.getContext('2d');
+    x.setTransform(scale, 0, 0, scale, 0, 0);
+    x.clearRect(0, 0, w, h);
+    draw(x, w, h);
+    tex.needsUpdate = true;
+  };
+  paint();
+  return { tex, paint };
+}
+
+function bezelTexture() {
+  // 1.62 × 1.3 units; the screen window is 1.2 × 1.08 in the middle
+  return canvasTexture(810, 650, (x, w, h) => {
+    x.fillStyle = '#efeae3'; x.fillRect(0, 0, w, h);
+    x.fillStyle = '#16161a'; x.fillRect(105, 55, 600, 540);
+    // two rules and the line every Game Boy has above its screen
+    x.fillStyle = '#c23b5a'; x.fillRect(40, 22, 250, 4);
+    x.fillStyle = '#3d3f8f'; x.fillRect(40, 30, 250, 4);
+    x.fillStyle = '#c23b5a'; x.fillRect(520, 22, 250, 4);
+    x.fillStyle = '#3d3f8f'; x.fillRect(520, 30, 250, 4);
+    x.fillStyle = '#5b5a63';
+    x.font = 'italic 600 15px "Inter Tight", Arial, sans-serif';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText('INK MATRIX WITH STEREO SOUND', w / 2, 28);
+    x.font = '600 12px "Inter Tight", Arial, sans-serif';
+    x.fillText('POWER', 52, 210);
+  }).tex;
+}
+
+function logoTexture() {
+  return canvasTexture(620, 100, (x, w, h) => {
+    x.fillStyle = '#f3ede4';
+    x.textBaseline = 'alphabetic';
+    x.font = '900 46px "Inter Tight", Arial, sans-serif';
+    const mol = 'Mol', mw = x.measureText(mol).width;
+    x.font = '400 60px "Mr Dafoe", cursive';
+    const tw = x.measureText('ten').width;
+    x.font = '900 22px "Inter Tight", Arial, sans-serif';
+    if ('letterSpacing' in x) x.letterSpacing = '3px';
+    const pw = x.measureText('POCKET').width;
+    const x0 = (w - (mw + tw + 18 + pw)) / 2;
+    x.font = '900 46px "Inter Tight", Arial, sans-serif';
+    if ('letterSpacing' in x) x.letterSpacing = '-1px';
+    x.fillText(mol, x0, 66);
+    x.font = '400 60px "Mr Dafoe", cursive';
+    if ('letterSpacing' in x) x.letterSpacing = '0px';
+    x.fillStyle = '#ffb41f';
+    x.fillText('ten', x0 + mw - 2, 62);
+    x.fillStyle = '#f3ede4';
+    x.font = '900 22px "Inter Tight", Arial, sans-serif';
+    if ('letterSpacing' in x) x.letterSpacing = '3px';
+    x.fillText('POCKET', x0 + mw + tw + 18, 64);
+  }).tex;
+}
+
+function wordTexture(text) {
+  return canvasTexture(150, 30, (x, w, h) => {
+    x.fillStyle = '#f3ede4';
+    x.font = '700 15px "Inter Tight", Arial, sans-serif';
+    if ('letterSpacing' in x) x.letterSpacing = '1.5px';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(text, w / 2, h / 2);
+  }).tex;
+}
+
+function chipTexture(text, rand) {
+  const code = `${2600 + Math.floor(rand() * 99)} ${String.fromCharCode(65 + Math.floor(rand() * 26))}${Math.floor(rand() * 90 + 10)}`;
+  return canvasTexture(256, 128, (x, w, h) => {
+    x.fillStyle = '#17171a'; x.fillRect(0, 0, w, h);
+    x.fillStyle = '#2a2a2f'; x.beginPath(); x.arc(22, 22, 8, 0, 7); x.fill();   // pin 1
+    x.fillStyle = '#a4a4ab';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.font = '700 30px "Inter Tight", Arial, sans-serif';
+    x.fillText(text, w / 2, h * 0.44);
+    x.font = '500 17px "Inter Tight", Arial, sans-serif';
+    x.fillText(code, w / 2, h * 0.74);
+  }, 1).tex;
+}
+
+function stickerTexture() {
+  return canvasTexture(512, 640, x => {
     x.fillStyle = '#f3ede2'; x.fillRect(0, 0, 512, 640);
     x.fillStyle = '#ffb41f'; x.fillRect(0, 0, 512, 22);
     x.fillStyle = '#0e0e0e';
@@ -676,10 +823,7 @@ function stickerTexture() {
     }
     x.font = '600 16px "Inter Tight", Arial, sans-serif';
     x.fillText('0 26 MOLTEN 01', 34, 606);
-    tex.needsUpdate = true;
-  }
-  paint();
-  return { tex, paint };
+  });
 }
 
 // ---- the cartridge: a Game Boy cartridge in tinted clear plastic, so its board, ROM and gold
@@ -704,7 +848,7 @@ function buildCart() {
   const front = CART_D / 2 + 0.018;
 
   const geo = new THREE.ExtrudeGeometry(cartShape(), {
-    depth: CART_D, bevelEnabled: true, bevelThickness: 0.018, bevelSize: 0.018, bevelSegments: 3, curveSegments: 8,
+    depth: CART_D, bevelEnabled: true, bevelThickness: 0.018, bevelSize: 0.018, bevelSegments: 4, curveSegments: 14,
   });
   geo.translate(0, 0, -CART_D / 2);
   const plastic = new THREE.MeshPhysicalMaterial({
@@ -740,7 +884,7 @@ function buildCart() {
 
   // the printed label in its recess
   const labelCanvas = document.createElement('canvas');
-  labelCanvas.width = 512; labelCanvas.height = 564;
+  labelCanvas.width = 1024; labelCanvas.height = 1128;   // drawn at 2× (see paintLabel)
   const labelTex = new THREE.CanvasTexture(labelCanvas);
   labelTex.colorSpace = THREE.SRGBColorSpace;
   labelTex.anisotropy = 8;
@@ -750,17 +894,14 @@ function buildCart() {
   recess.position.set(0, 0.04, front + 0.0005);
 
   // the back: a small sticker
-  const backCanvas = document.createElement('canvas');
-  backCanvas.width = 256; backCanvas.height = 160;
-  const bx = backCanvas.getContext('2d');
-  bx.fillStyle = '#f4ecdd'; bx.fillRect(0, 0, 256, 160);
-  bx.fillStyle = '#0e0e0e';
-  bx.font = '900 34px Arial, sans-serif'; bx.fillText('MOLTEN', 18, 52);
-  bx.font = '600 13px Arial, sans-serif';
-  ['GAME PAK · MLT-01', 'MADE IN 2026', 'DO NOT STIR WHILE HOT'].forEach((s, i) => bx.fillText(s, 18, 86 + i * 22));
-  const backTex = new THREE.CanvasTexture(backCanvas);
-  backTex.colorSpace = THREE.SRGBColorSpace;
-  const back = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.56), new THREE.MeshStandardMaterial({ map: backTex, roughness: 0.6 }));
+  const backLabel = canvasTexture(256, 160, bx => {
+    bx.fillStyle = '#f4ecdd'; bx.fillRect(0, 0, 256, 160);
+    bx.fillStyle = '#0e0e0e';
+    bx.font = '900 34px "Inter Tight", Arial, sans-serif'; bx.fillText('MOLTEN', 18, 52);
+    bx.font = '600 13px "Inter Tight", Arial, sans-serif';
+    ['GAME PAK · MLT-01', 'MADE IN 2026', 'DO NOT STIR WHILE HOT'].forEach((s, i) => bx.fillText(s, 18, 86 + i * 22));
+  });
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.56), new THREE.MeshStandardMaterial({ map: backLabel.tex, roughness: 0.6 }));
   back.position.set(0, 0.2, -front - 0.002);
   back.rotation.y = Math.PI;
 
@@ -773,6 +914,7 @@ function buildCart() {
     plastic.color.copy(col);
     plastic.attenuationColor.copy(col);
     emboss.color.copy(col).lerp(new THREE.Color('#ffffff'), 0.35);
+    backLabel.paint();
     return paintLabel(labelCanvas.getContext('2d'), cart, labelTex);
   }
   return { group, paint, hits: [body, label] };
@@ -782,6 +924,7 @@ function paintLabel(c, cart, tex) {
   const W = 512, H = 564, INK = '#0e0e0e', PAPER = '#f4ecdd';
   const n = String(cart.index + 1).padStart(2, '0');
   c.save();
+  c.setTransform(2, 0, 0, 2, 0, 0);   // the canvas is 2×: draw in label units
   c.fillStyle = PAPER; c.fillRect(0, 0, W, H);
   // paper grain
   const rand = rng(cart.id.length * 31 + 7);
@@ -848,41 +991,62 @@ function paintLabel(c, cart, tex) {
 }
 
 function letterTexture(ch) {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const x = c.getContext('2d');
-  x.fillStyle = '#8f897f';
-  x.font = '700 40px "Inter Tight", Arial, sans-serif';
-  x.textAlign = 'center';
-  x.textBaseline = 'middle';
-  x.fillText(ch, 32, 35);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
+  return canvasTexture(64, 64, x => {
+    x.fillStyle = '#8f897f';
+    x.font = '700 40px "Inter Tight", Arial, sans-serif';
+    x.textAlign = 'center';
+    x.textBaseline = 'middle';
+    x.fillText(ch, 32, 35);
+  }, 3).tex;
 }
 
+// the board's copper: traces that jog at 45°, vias, pads for the chips and white silkscreen,
+// drawn at 1024×1600 so it holds up behind the glass
 function traceTexture(rand) {
-  const c = document.createElement('canvas');
-  c.width = 512; c.height = 800;
-  const x = c.getContext('2d');
-  x.fillStyle = '#2b201b';
-  x.fillRect(0, 0, 512, 800);
-  x.lineWidth = 3; x.lineCap = 'round'; x.lineJoin = 'round';
-  for (let i = 0; i < 70; i++) {
-    let px = rand() * 512, py = rand() * 800;
-    x.strokeStyle = `rgba(190, 150, 70, ${0.45 + rand() * 0.55})`;
-    x.beginPath();
-    x.moveTo(px, py);
-    for (let k = 0; k < 4; k++) {
-      if (rand() < 0.5) px += (rand() - 0.5) * 220; else py += (rand() - 0.5) * 220;
-      x.lineTo(px, py);
+  return canvasTexture(1024, 1600, (x, w, h) => {
+    x.fillStyle = '#2a1f1a'; x.fillRect(0, 0, w, h);
+    x.lineCap = 'round'; x.lineJoin = 'round';
+    const gold = a => `rgba(196, 156, 76, ${a})`;
+    for (let i = 0; i < 170; i++) {
+      let px = rand() * w, py = rand() * h;
+      x.strokeStyle = gold(0.35 + rand() * 0.5);
+      x.lineWidth = rand() < 0.8 ? 2.5 : 5;
+      x.beginPath();
+      x.moveTo(px, py);
+      for (let k = 0; k < 5; k++) {
+        const len = 30 + rand() * 180, r = rand();
+        if (r < 0.4) px += (rand() < 0.5 ? -1 : 1) * len;
+        else if (r < 0.8) py += (rand() < 0.5 ? -1 : 1) * len;
+        else { const d = (rand() < 0.5 ? -1 : 1) * len * 0.6; px += d; py += Math.abs(d) * (rand() < 0.5 ? -1 : 1); }
+        x.lineTo(px, py);
+      }
+      x.stroke();
+      x.fillStyle = gold(0.95);                       // a via at the end
+      x.beginPath(); x.arc(px, py, 6, 0, 7); x.fill();
+      x.fillStyle = '#1a120e';
+      x.beginPath(); x.arc(px, py, 2.4, 0, 7); x.fill();
     }
-    x.stroke();
-    x.fillStyle = '#d4ad55';
-    x.beginPath(); x.arc(px, py, 5, 0, 7); x.fill();
-  }
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
-  return t;
+    // pad rows where chips would sit
+    for (let i = 0; i < 14; i++) {
+      const cx = rand() * (w - 160) + 40, cy = rand() * (h - 120) + 40, n = 4 + Math.floor(rand() * 8);
+      x.fillStyle = gold(0.9);
+      for (let k = 0; k < n; k++) { x.fillRect(cx + k * 14, cy, 8, 18); x.fillRect(cx + k * 14, cy + 70, 8, 18); }
+    }
+    // silkscreen
+    x.fillStyle = 'rgba(236, 230, 214, 0.75)';
+    x.font = '600 20px "Inter Tight", Arial, sans-serif';
+    for (let i = 0; i < 26; i++) {
+      const t = ['C', 'R', 'U', 'L', 'Q'][Math.floor(rand() * 5)] + (1 + Math.floor(rand() * 40));
+      x.fillText(t, rand() * (w - 60), rand() * h);
+    }
+    x.font = '700 26px "Inter Tight", Arial, sans-serif';
+    x.fillText('MLT-01  REV.B', 60, h - 60);
+    x.fillText('© 2026 MOLTEN', w - 300, h - 60);
+    // mounting holes
+    for (const [mx, my] of [[50, 50], [w - 50, 50], [50, h - 120], [w - 50, h - 120]]) {
+      x.strokeStyle = gold(0.9); x.lineWidth = 6;
+      x.beginPath(); x.arc(mx, my, 20, 0, 7); x.stroke();
+      x.fillStyle = '#0d0907'; x.beginPath(); x.arc(mx, my, 13, 0, 7); x.fill();
+    }
+  }, 1).tex;
 }

@@ -9,8 +9,17 @@ const heavy = s => `900 ${s}px "Inter Tight", "Helvetica Neue", Arial, sans-seri
 const brush = s => `400 ${s * 1.32}px "Mr Dafoe", "Snell Roundhand", cursive`;
 const small = s => `600 ${s}px "Inter Tight", Arial, sans-serif`;
 
+// the wordmark's largest size: on narrow screens it is held down so every title leaves room for the console
+const cap = (W, H) => (W / H < 1.15 ? Math.min(W * 0.3, H * 0.4) : H * 0.4);
+
+// the lowest any title's line of text can reach, in pixels — the console is placed under it on narrow screens
+export function typeBottom(W, H) {
+  const top = Math.max(76, H * 0.12), tiny = clamp(W * 0.0085, 10, 13);
+  return top + cap(W, H) * 0.76 + tiny * 2.8;
+}
+
 export function paintType(canvas, content, W, H, hidden) {
-  const dpr = Math.min(devicePixelRatio, 1.5);
+  const dpr = Math.min(devicePixelRatio, 2);
   canvas.width = Math.round(W * dpr);
   canvas.height = Math.round(H * dpr);
   const c = canvas.getContext('2d');
@@ -40,7 +49,7 @@ export function paintType(canvas, content, W, H, hidden) {
       return [a, c.measureText(content.script).width];
     };
     let [a, b] = widths(100);
-    const s = Math.min((W - pad * 2) / (a + b - 4) * 94, H * 0.4);   // the brush tail overshoots its measured width
+    const s = Math.min((W - pad * 2) / (a + b - 4) * 94, cap(W, H));   // the brush tail overshoots its measured width
     [a, b] = widths(s);
     const overlap = s * 0.04;
     const x0 = (W - (a + b - overlap)) / 2;

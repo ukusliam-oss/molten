@@ -10,7 +10,7 @@ import { sfx } from './sound.js';
 const KEYS = {
   ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down',
   z: 'a', Z: 'a', ' ': 'a', x: 'b', X: 'b', Escape: 'b', Backspace: 'b',
-  Enter: 'start', Shift: 'select',
+  Enter: 'start', s: 'select', S: 'select',   // not Shift: Shift+Tab would open the list
 };
 // face buttons X and Y double as SELECT and START; tapping the screen is A
 const ACTION = { x: 'select', y: 'start', screen: 'a' };
@@ -180,8 +180,9 @@ export function controller(hero) {
   addEventListener('keydown', e => {
     const k = KEYS[e.key];
     if (!k || e.metaKey || e.ctrlKey || e.altKey) return;
+    // Enter or Space on a focused pill or button belongs to that control, not the console
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.closest?.('a, button')) return;
     if (e.repeat && !['left', 'right', 'up', 'down'].includes(k)) return;
-    if (s.mode === 'view' && e.key === ' ' && document.activeElement?.closest('.viewer')) return;   // let Space press the focused button
     e.preventDefault();
     press(k);
   });

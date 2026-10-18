@@ -5,11 +5,15 @@ import { HOME } from './cartridges.js';
 const section = document.querySelector('.hero');
 
 // canvas text needs the web fonts; the plain-HTML wordmark stays up until they are in and a frame is drawn
-const fontsReady = Promise.all([
-  document.fonts.load('900 100px "Inter Tight"'),
-  document.fonts.load('600 13px "Inter Tight"'),
-  document.fonts.load('400 100px "Mr Dafoe"'),
-  document.fonts.load('8px "Press Start 2P"'),
+// (never wait more than 2.5 s: a stalled font request must not keep the console hidden)
+const fontsReady = Promise.race([
+  Promise.all([
+    document.fonts.load('900 100px "Inter Tight"'),
+    document.fonts.load('600 13px "Inter Tight"'),
+    document.fonts.load('400 100px "Mr Dafoe"'),
+    document.fonts.load('8px "Press Start 2P"'),
+  ]),
+  new Promise(r => setTimeout(r, 2500)),
 ]).catch(() => {});
 
 let h;
@@ -24,6 +28,16 @@ try {
 }
 
 if (h) {
+  const status = section.querySelector('.hero__status');
+  h.canvas.addEventListener('webglcontextlost', e => {
+    e.preventDefault();
+    section.classList.remove('is-live');
+    section.classList.add('is-broken');
+    status.textContent = 'The console lost its screen — tap to restart.';
+    section.querySelector('.hero__fallback').addEventListener('click', () => location.reload(), { once: true });
+  });
+  h.canvas.addEventListener('webglcontextrestored', () => location.reload());
+
   let firstFrame;
   const drawn = new Promise(r => { firstFrame = r; });
   Promise.all([fontsReady, drawn]).then(() => {
